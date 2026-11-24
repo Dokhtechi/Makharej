@@ -9,8 +9,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,12 +37,15 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -76,6 +84,7 @@ import com.example.ui.components.SettingsDialog
 import com.example.ui.screens.AnnualCalendarScreen
 import com.example.ui.screens.AnnualCommitmentsScreen
 import com.example.ui.screens.DashboardScreen
+import com.example.ui.screens.EntertainmentScreen
 import com.example.ui.screens.MonthDetailScreen
 import com.example.ui.screens.NewsScreen
 import com.example.ui.screens.ReportsScreen
@@ -109,13 +118,15 @@ import com.example.utils.FontScaleHelper
 import com.example.utils.GitHubUpdateHelper
 import com.example.utils.PersianDateHelper
 import com.example.utils.ReportTableExporter
+import com.example.utils.configureAppCheck
 
 enum class ScreenTab(val title: String, val icon: ImageVector) {
     DASHBOARD("خانه", Icons.Default.Home),
     REPORTS("گزارش‌ها", Icons.Default.QueryStats),
     TOOLS("امکانات", Icons.Default.Calculate),
-    ANNUAL("تعهدات سالانه", Icons.Default.Shield),
-    NEWS("اخبار", Icons.Default.Newspaper)
+    ANNUAL("تعهدات", Icons.Default.Shield),
+    NEWS("اخبار", Icons.Default.Newspaper),
+    ENTERTAINMENT("سرگرمی", Icons.Default.SportsEsports)
 }
 
 class MainActivity : ComponentActivity() {
@@ -124,6 +135,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Configure Firebase App Check with launch intent before any UI, ViewModels, or Firebase operations
+        configureAppCheck(this, intent)
+
         enableEdgeToEdge()
         window.decorView.isVerticalScrollBarEnabled = false
         window.decorView.isHorizontalScrollBarEnabled = false
@@ -187,6 +201,7 @@ fun ExpenseTrackerApp(
 
     var currentTab by rememberSaveable { mutableStateOf(ScreenTab.DASHBOARD) }
     var reportsInitialSubTab by rememberSaveable { mutableStateOf(ReportsTabSection.FOLDER_REPORTS) }
+    var isBottomBarCollapsed by rememberSaveable { mutableStateOf(false) }
     var showAddBottomSheet by remember { mutableStateOf(false) }
     var showVoiceExpenseDialog by remember { mutableStateOf(false) }
     var isAnnualPreselected by remember { mutableStateOf(false) }
@@ -201,19 +216,25 @@ fun ExpenseTrackerApp(
     var pendingRestoreData by remember { mutableStateOf<BackupRestoreHelper.BackupData?>(null) }
 
     LaunchedEffect(Unit) {
-        val savedRepo = GitHubUpdateHelper.getSavedRepoInput(context)
-        if (GitHubUpdateHelper.isAutoCheckAndDownloadEnabled(context) &&
-            GitHubUpdateHelper.parseOwnerAndRepo(savedRepo) != null
-        ) {
-            val result = GitHubUpdateHelper.checkForUpdate(savedRepo)
-            if (result.isUpdateAvailable && result.downloadUrl.isNotBlank()) {
-                GitHubUpdateHelper.openDownloadUrl(context, result.downloadUrl)
-                Toast.makeText(
-                    context,
-                    "نسخه جدید (${result.latestVersion}) در گیتهاب یافت شد و دانلود آغاز گردید",
-                    Toast.LENGTH_LONG
-                ).show()
+        try {
+            val savedRepo = GitHubUpdateHelper.getSavedRepoInput(context)
+            if (GitHubUpdateHelper.isAutoCheckAndDownloadEnabled(context) &&
+                GitHubUpdateHelper.parseOwnerAndRepo(savedRepo) != null
+            ) {
+                val result = GitHubUpdateHelper.checkForUpdate(savedRepo)
+                if (result.isUpdateAvailable && result.downloadUrl.isNotBlank()) {
+                    GitHubUpdateHelper.openDownloadUrl(context, result.downloadUrl)
+                    Toast.makeText(
+                        context,
+                        "نسخه جدید (${result.latestVersion}) در گیتهاب یافت شد و دانلود آغاز گردید",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
+        } catch (_: Throwable) {
+            // Isolated external check: never disrupt app launch
         }
     }
 
@@ -285,68 +306,102 @@ fun ExpenseTrackerApp(
             )
         },
         bottomBar = {
-            val navGradient = if (isDarkMode) {
-                listOf(
-                    Color(0xFF0F172A),
-                    Color(0xFF1E1B4B),
-                    Color(0xFF134E4A)
-                )
-            } else {
-                listOf(
-                    Color(0xFF312E81), // Royal Indigo
-                    Color(0xFF1E40AF), // Deep Sapphire Blue
-                    Color(0xFF0E7490)  // Luminous Ocean Teal
-                )
-            }
-            val topHighlightBrush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-                listOf(
-                    Color(0xFF34D399),
-                    Color(0xFF38BDF8),
-                    Color(0xFFFBBF24),
-                    Color(0xFFA78BFA)
-                )
-            )
-            androidx.compose.material3.Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.navigationBars)
-                    .testTag("main_bottom_nav"),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
-                shadowElevation = 12.dp,
-                color = Color.Transparent
+            AnimatedVisibility(
+                visible = !isBottomBarCollapsed,
+                enter = slideInVertically(initialOffsetY = { it }) + expandVertically() + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + shrinkVertically() + fadeOut()
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(androidx.compose.ui.graphics.Brush.horizontalGradient(navGradient))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(2.5.dp)
-                            .background(topHighlightBrush)
+                val navGradient = if (isDarkMode) {
+                    listOf(
+                        Color(0xFF0F172A),
+                        Color(0xFF1E1B4B),
+                        Color(0xFF134E4A)
                     )
-                    androidx.compose.foundation.layout.Row(
+                } else {
+                    listOf(
+                        Color(0xFF312E81), // Royal Indigo
+                        Color(0xFF1E40AF), // Deep Sapphire Blue
+                        Color(0xFF0E7490)  // Luminous Ocean Teal
+                    )
+                }
+                val topHighlightBrush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    listOf(
+                        Color(0xFF34D399),
+                        Color(0xFF38BDF8),
+                        Color(0xFFFBBF24),
+                        Color(0xFFA78BFA)
+                    )
+                )
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Sleek Down-Arrow handle right above the bottom nav bar to slide it down
+                    androidx.compose.material3.Surface(
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
+                        color = if (isDarkMode) Color(0xFF1E1B4B) else Color(0xFF1E40AF),
+                        border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.7f)),
+                        shadowElevation = 4.dp,
+                        modifier = Modifier
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+                            .clickable { isBottomBarCollapsed = true }
+                            .testTag("collapse_bottom_bar_button")
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(horizontal = 22.dp, vertical = 1.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "پنهان کردن نوار پایین",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    androidx.compose.material3.Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 6.dp, vertical = 7.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                            .testTag("main_bottom_nav"),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+                        shadowElevation = 12.dp,
+                        color = Color.Transparent
                     ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(androidx.compose.ui.graphics.Brush.horizontalGradient(navGradient))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(2.5.dp)
+                                    .background(topHighlightBrush)
+                            )
+                            androidx.compose.foundation.layout.Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp, vertical = 7.dp),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                         val uiScale = LocalAppFontScale.current
                         ScreenTab.values().forEach { tab ->
                             val isSelected = currentTab == tab
                             val activePillColor = when (tab) {
-                                ScreenTab.DASHBOARD -> Color(0xFF10B981) // Emerald
-                                ScreenTab.REPORTS -> Color(0xFF0EA5E9)   // Sky Cyan
-                                ScreenTab.TOOLS -> Color(0xFFF59E0B)     // Radiant Gold
-                                ScreenTab.ANNUAL -> Color(0xFFA855F7)    // Amethyst Violet
-                                ScreenTab.NEWS -> Color(0xFFF43F5E)      // Coral Rose
+                                ScreenTab.DASHBOARD -> Color(0xFF10B981)     // Emerald
+                                ScreenTab.REPORTS -> Color(0xFF0EA5E9)       // Sky Cyan
+                                ScreenTab.TOOLS -> Color(0xFFF59E0B)         // Radiant Gold
+                                ScreenTab.ANNUAL -> Color(0xFFA855F7)        // Amethyst Violet
+                                ScreenTab.NEWS -> Color(0xFFF43F5E)          // Coral Rose
+                                ScreenTab.ENTERTAINMENT -> Color(0xFF14B8A6) // Luminous Teal
                             }
                             val activeContentColor = if (tab == ScreenTab.TOOLS) Color(0xFF1E1B4B) else Color.White
                             val itemInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-                            val navMinHeight = (56f * uiScale).coerceAtLeast(48f).dp
-                            val navIconSize = ((if (isSelected) 23f else 21f) * uiScale).coerceIn(18f, 28f).dp
+                            val navMinHeight = (54f * uiScale).coerceAtLeast(48f).dp
+                            val navIconSize = ((if (isSelected) 22f else 20f) * uiScale).coerceIn(17f, 26f).dp
                             val navVerticalPad = (6f * uiScale).coerceIn(4f, 10f).dp
 
                             Box(
@@ -354,7 +409,7 @@ fun ExpenseTrackerApp(
                                 modifier = Modifier
                                     .weight(1f)
                                     .heightIn(min = navMinHeight)
-                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
                                     .then(
                                         if (isSelected) {
                                             Modifier
@@ -362,7 +417,7 @@ fun ExpenseTrackerApp(
                                                 .border(
                                                     1.2.dp,
                                                     Color.White.copy(alpha = 0.75f),
-                                                    androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+                                                    androidx.compose.foundation.shape.RoundedCornerShape(14.dp)
                                                 )
                                         } else {
                                             Modifier
@@ -378,7 +433,8 @@ fun ExpenseTrackerApp(
                                             currentTab = tab
                                         }
                                     )
-                                    .padding(horizontal = 3.dp, vertical = navVerticalPad)
+                                    .padding(horizontal = 2.dp, vertical = navVerticalPad)
+                                    .testTag("nav_tab_${tab.name.lowercase()}")
                             ) {
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -393,8 +449,8 @@ fun ExpenseTrackerApp(
                                     androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(3.dp))
                                     Text(
                                         text = tab.title,
-                                        fontSize = if (tab == ScreenTab.ANNUAL) 10.sp else 11.sp,
-                                        lineHeight = 13.sp,
+                                        fontSize = 9.5.sp,
+                                        lineHeight = 12.sp,
                                         fontWeight = if (isSelected) FontWeight.Black else FontWeight.ExtraBold,
                                         color = if (isSelected) activeContentColor else Color.White,
                                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -406,12 +462,15 @@ fun ExpenseTrackerApp(
                     }
                 }
             }
+                }
+            }
         },
         floatingActionButton = {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+            if (currentTab != ScreenTab.ENTERTAINMENT) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                 SmallFloatingActionButton(
                     onClick = { showVoiceExpenseDialog = true },
                     containerColor = Color(0xFF0EA5E9),
@@ -445,6 +504,7 @@ fun ExpenseTrackerApp(
                         contentDescription = "ثبت هزینه جدید",
                         modifier = Modifier.size(26.dp)
                     )
+                }
                 }
             }
         }
@@ -547,6 +607,44 @@ fun ExpenseTrackerApp(
                 ScreenTab.NEWS -> {
                     NewsScreen(viewModel = viewModel)
                 }
+                ScreenTab.ENTERTAINMENT -> {
+                    EntertainmentScreen(viewModel = viewModel)
+                }
+            }
+
+            // Compact Up-Arrow tab docked at bottom-center when bottom nav bar is collapsed
+            AnimatedVisibility(
+                visible = isBottomBarCollapsed,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(bottom = 2.dp)
+            ) {
+                androidx.compose.material3.Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 8.dp, bottomEnd = 8.dp),
+                    color = if (isDarkMode) Color(0xFF1E1B4B) else Color(0xFF1E40AF),
+                    border = BorderStroke(1.3.dp, Color(0xFF38BDF8)),
+                    shadowElevation = 8.dp,
+                    modifier = Modifier
+                        .heightIn(min = 32.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 8.dp, bottomEnd = 8.dp))
+                        .clickable { isBottomBarCollapsed = false }
+                        .testTag("expand_bottom_bar_button")
+                ) {
+                    Box(
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowUp,
+                            contentDescription = "نمایش نوار پایین",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -626,8 +724,9 @@ fun ExpenseTrackerApp(
                 Toast.makeText(context, "تمامی داده‌ها پاک و برنامه ریست شد", Toast.LENGTH_SHORT).show()
             },
             onBackupData = {
-                val jsonBackup = viewModel.createFullBackupJson()
-                BackupRestoreHelper.shareBackupFile(context, jsonBackup)
+                viewModel.createFullBackupJsonAsync { jsonBackup ->
+                    BackupRestoreHelper.shareBackupFile(context, jsonBackup)
+                }
             },
             onRestoreData = {
                 try {
@@ -711,12 +810,24 @@ fun ExpenseTrackerApp(
             },
             text = {
                 ScaledDialogContent {
+                    val extrasSummary = buildString {
+                        if (backup.receiptImagesBase64.isNotEmpty()) {
+                            append("\n• ${backup.receiptImagesBase64.size} تصویر رسید پیوست")
+                        }
+                        if (backup.preferences.isNotEmpty()) {
+                            append("\n• تنظیمات برنامه و یادآورهای اقساط")
+                        }
+                        if (backup.entertainmentProgress.isNotEmpty()) {
+                            append("\n• ${backup.entertainmentProgress.size} رکورد پیشرفت سرگرمی")
+                        }
+                    }
                     Text(
                         text = enDigits(
-                            "فایل پشتیبان با موفقیت خوانده شد:\n" +
+                            "فایل پشتیبان (نسخه ${backup.version}) با موفقیت خوانده شد:\n" +
                                 "• ${backup.expenses.size} هزینه ثبت‌شده\n" +
-                                "• ${backup.customFolders.size} پوشه و ساختار برنامه\n" +
-                                "• تاریخ فایل پشتیبان: ${PersianDateHelper.toEnglishDigits(backup.backupDateShamsi)}\n\n" +
+                                "• ${backup.customFolders.size} پوشه و ساختار برنامه" +
+                                extrasSummary +
+                                "\n• تاریخ فایل پشتیبان: ${PersianDateHelper.toEnglishDigits(backup.backupDateShamsi)}\n\n" +
                                 "آیا مایلید تمام داده‌های فوق بازیابی شوند؟ (اطلاعات فعلی با داده‌های این فایل پشتیبان جایگزین خواهند شد)"
                         ),
                         fontSize = 12.5.sp,
@@ -728,9 +839,8 @@ fun ExpenseTrackerApp(
                 ScaledDialogContent {
                     Button(
                         onClick = {
-                            viewModel.restoreBackup(
-                                expenses = backup.expenses,
-                                customFolders = backup.customFolders,
+                            viewModel.restoreFullBackup(
+                                backup = backup,
                                 replaceExisting = true
                             ) { success, expCount, foldCount ->
                                 if (success) {

@@ -11,14 +11,17 @@ import com.example.data.model.MarketRatesState
 import com.example.data.model.MonthSummary
 import com.example.data.model.NewsArticle
 import com.example.data.model.ResolvedExpense
-import com.example.data.network.BaleExtractedRates
 import com.example.data.network.MarketRatesService
 import com.example.data.repository.ExpenseRepository
 import com.example.data.repository.FolderMatcher
 import com.example.data.repository.NewsRepository
+import com.example.utils.BackupRestoreHelper
 import com.example.utils.HijriDate
 import com.example.utils.IranianCalendarHelper
 import com.example.utils.PersianDateHelper
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,6 +31,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class LiveClockState(
     val shamsiDate: PersianDateHelper.ShamsiDate = PersianDateHelper.getShamsiDate(),
@@ -96,38 +100,149 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
     private val _marketRates = MutableStateFlow(marketRatesService.getCachedOrDefault())
     val marketRates: StateFlow<MarketRatesState> = _marketRates.asStateFlow()
 
-    // News Repository (40 Curated Articles from Tabnak, Zoomit, IranWire)
-    private val newsRepository = NewsRepository()
+    // Live News Repository (only latest refresh kept in storage; prior news purged)
+    private val newsRepository = NewsRepository(application)
     val newsList: StateFlow<List<NewsArticle>> = newsRepository.newsList
     val isNewsLoading: StateFlow<Boolean> = newsRepository.isLoading
     val newsLastUpdated: StateFlow<String> = newsRepository.lastUpdated
+    val newsErrorMessage: StateFlow<String?> = newsRepository.errorMessage
+
+    // Persian (fa-IR) Voice News Reader
+    private val newsSpeechEngine = com.example.utils.PersianNewsSpeechEngine(application)
+    val newsSpeechState: StateFlow<com.example.utils.NewsSpeechState> = newsSpeechEngine.state
+
+    // Isolated exception handler so external market/news failures never impact core financial flows
+    private val externalServiceExceptionHandler = CoroutineExceptionHandler { _, _ -> }
+
+    // Offline Entertainment Room Database Repository (Crossword, Sudoku, Trivia)
+    private val entertainmentRepository = com.example.data.repository.EntertainmentRepository(application)
+    val entertainmentPuzzles: StateFlow<List<com.example.data.model.EntertainmentPuzzleEntity>> =
+        entertainmentRepository.allPuzzles.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+    val entertainmentPackMeta: StateFlow<com.example.data.model.EntertainmentPackMetaEntity?> =
+        entertainmentRepository.packMeta.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = null
+        )
+    val entertainmentDownloadState: StateFlow<com.example.data.model.EntertainmentDownloadState> =
+        entertainmentRepository.downloadState
+
+    fun ensureEntertainmentDatabaseReady() {
+        viewModelScope.launch {
+            entertainmentRepository.ensureDatabaseReady()
+        }
+    }
+
+    fun downloadFullEntertainmentDatabase() {
+        viewModelScope.launch {
+            entertainmentRepository.downloadAndSyncFullOfflineDatabase(checkRemoteGitHub = true)
+        }
+    }
+
+    fun saveEntertainmentProgress(puzzleId: String, progressJson: String, mistakesCount: Int) {
+        viewModelScope.launch {
+            entertainmentRepository.saveProgress(puzzleId, progressJson, mistakesCount)
+        }
+    }
+
+    fun markEntertainmentCompleted(
+        puzzleId: String,
+        progressJson: String,
+        elapsedSeconds: Int,
+        mistakesCount: Int
+    ) {
+        viewModelScope.launch {
+            entertainmentRepository.markCompleted(puzzleId, progressJson, elapsedSeconds, mistakesCount)
+        }
+    }
+
+    fun clearEntertainmentDownloadMessage() {
+        entertainmentRepository.clearDownloadMessage()
+    }
+
+    private var hasAutoRefreshedNewsThisSession = false
+
+    fun ensureNewsRefreshedOnAppOpen() {
+        if (hasAutoRefreshedNewsThisSession) return
+        hasAutoRefreshedNewsThisSession = true
+        refreshNews()
+    }
 
     fun refreshNews() {
-        viewModelScope.launch {
-            newsRepository.refreshNews()
+        hasAutoRefreshedNewsThisSession = true
+        newsSpeechEngine.stop()
+        viewModelScope.launch(externalServiceExceptionHandler) {
+            try {
+                newsRepository.refreshNews()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Throwable) {
+                // Isolated external failure: keep existing saved news batch untouched
+            }
         }
     }
 
-    fun refreshMarketRates(onComplete: (() -> Unit)? = null) {
-        viewModelScope.launch {
+    fun toggleSpeakNews(article: NewsArticle) {
+        newsSpeechEngine.toggleArticle(article)
+    }
+
+    fun stopSpeakingNews() {
+        newsSpeechEngine.stop()
+    }
+
+    fun cycleNewsSpeechSpeed() {
+        newsSpeechEngine.cycleSpeed()
+    }
+
+    fun toggleNewsVoicePersona() {
+        newsSpeechEngine.toggleVoicePersona()
+    }
+
+    fun selectNewsVoicePersona(persona: com.example.utils.NewsVoicePersona) {
+        newsSpeechEngine.selectVoicePersona(persona)
+    }
+
+    fun loadFullNewsArticle(article: NewsArticle, onLoaded: (NewsArticle) -> Unit) {
+        viewModelScope.launch(externalServiceExceptionHandler) {
+            val enriched = try {
+                newsRepository.fetchFullArticleDetails(article)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Throwable) {
+                article
+            }
+            onLoaded(enriched)
+        }
+    }
+
+    fun clearNewsSpeechStatus() {
+        newsSpeechEngine.clearStatusMessage()
+    }
+
+    override fun onCleared() {
+        newsSpeechEngine.release()
+        super.onCleared()
+    }
+
+    fun refreshMarketRates(onComplete: ((Boolean) -> Unit)? = null) {
+        viewModelScope.launch(externalServiceExceptionHandler) {
             _marketRates.value = _marketRates.value.copy(isLoading = true)
-            val updated = marketRatesService.fetchRates()
+            val updated = try {
+                marketRatesService.fetchRates()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Throwable) {
+                marketRatesService.getCachedOrDefault(
+                    err = "خطا در دریافت نرخ‌ها؛ آخرین مقادیر ذخیره‌شده نمایش داده می‌شود."
+                )
+            }
             _marketRates.value = updated
-            onComplete?.invoke()
+            onComplete?.invoke(updated.isSuccess && updated.errorMessage.isNullOrBlank())
         }
-    }
-
-    fun applyBaleExtractedRates(extracted: BaleExtractedRates) {
-        val updated = marketRatesService.saveBaleRatesResult(extracted)
-        _marketRates.value = updated
-    }
-
-    fun markBaleLoginRequired(needsLogin: Boolean, statusMsg: String? = null) {
-        _marketRates.value = _marketRates.value.copy(
-            isLoading = false,
-            baleNeedsLogin = needsLogin,
-            baleStatusMessage = statusMsg
-        )
     }
 
     init {
@@ -513,10 +628,91 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun createFullBackupJson(): String {
-        return com.example.utils.BackupRestoreHelper.createBackupJson(
+        return BackupRestoreHelper.createBackupJson(
             expenses = allExpenses.value,
-            customFolders = customFolders.value
+            customFolders = customFolders.value,
+            context = getApplication(),
+            entertainmentPuzzles = entertainmentPuzzles.value
         )
+    }
+
+    fun createFullBackupJsonAsync(onReady: (String) -> Unit) {
+        viewModelScope.launch {
+            val appCtx = getApplication<Application>()
+            val json = withContext(Dispatchers.IO) {
+                val puzzlesSnapshot = runCatching {
+                    com.example.data.db.EntertainmentDatabase.getDatabase(appCtx)
+                        .entertainmentDao()
+                        .getAllPuzzlesSnapshot()
+                }.getOrElse { entertainmentPuzzles.value }
+
+                BackupRestoreHelper.createBackupJson(
+                    expenses = allExpenses.value,
+                    customFolders = customFolders.value,
+                    context = appCtx,
+                    entertainmentPuzzles = puzzlesSnapshot
+                )
+            }
+            onReady(json)
+        }
+    }
+
+    fun restoreFullBackup(
+        backup: BackupRestoreHelper.BackupData,
+        replaceExisting: Boolean = true,
+        onComplete: (Boolean, Int, Int) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val appCtx = getApplication<Application>()
+                val relinkedExpenses = withContext(Dispatchers.IO) {
+                    val updatedExpenses = BackupRestoreHelper.restoreReceiptImagesAndRelink(
+                        context = appCtx,
+                        expenses = backup.expenses,
+                        receiptImagesBase64 = backup.receiptImagesBase64
+                    )
+                    if (backup.preferences.isNotEmpty()) {
+                        BackupRestoreHelper.restorePreferences(appCtx, backup.preferences)
+                    }
+                    updatedExpenses
+                }
+
+                repository.restoreBackup(relinkedExpenses, backup.customFolders, replaceExisting)
+
+                if (backup.entertainmentProgress.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            entertainmentRepository.ensureDatabaseReady()
+                            val dao = com.example.data.db.EntertainmentDatabase.getDatabase(appCtx).entertainmentDao()
+                            for (entry in backup.entertainmentProgress) {
+                                if (entry.isCompleted) {
+                                    dao.markCompleted(
+                                        id = entry.id,
+                                        progressJson = entry.savedProgressJson,
+                                        elapsedSeconds = entry.bestTimeSeconds,
+                                        mistakesCount = entry.mistakesCount,
+                                        updatedAt = entry.updatedAtEpochMs
+                                    )
+                                } else if (entry.savedProgressJson.isNotBlank()) {
+                                    dao.saveProgress(
+                                        id = entry.id,
+                                        progressJson = entry.savedProgressJson,
+                                        mistakesCount = entry.mistakesCount,
+                                        updatedAt = entry.updatedAtEpochMs
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                onComplete(true, relinkedExpenses.size, backup.customFolders.size)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                e.printStackTrace()
+                onComplete(false, 0, 0)
+            }
+        }
     }
 
     fun restoreBackup(
@@ -530,6 +726,7 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
                 repository.restoreBackup(expenses, customFolders, replaceExisting)
                 onComplete(true, expenses.size, customFolders.size)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 e.printStackTrace()
                 onComplete(false, 0, 0)
             }

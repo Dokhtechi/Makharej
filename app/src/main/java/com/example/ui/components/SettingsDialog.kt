@@ -2,6 +2,7 @@ package com.example.ui.components
 
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -70,14 +71,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.R
 import com.example.ui.theme.OutfitFontFamily
 import com.example.ui.theme.ScaledDialogContent
 import com.example.ui.theme.appSecondaryTextColor
@@ -787,7 +791,7 @@ fun SettingsDialog(
                                     color = updateTitleColor
                                 )
                                 Text(
-                                    text = enDigits("نسخه فعلی: V2 (2.0) • اتصال مستقیم به گیتهاب"),
+                                    text = enDigits("نسخه فعلی: V3.0 • اتصال مستقیم به گیتهاب"),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = updateSubtitleColor
@@ -1024,17 +1028,21 @@ fun SettingsDialog(
                                 }
                             }
 
-                            // Version Badge: V2
+                            // Version Badge: V3.0
                             Surface(
                                 shape = RoundedCornerShape(9.dp),
                                 color = Color(0xFF0284C7),
-                                modifier = Modifier.padding(start = 6.dp)
+                                modifier = Modifier
+                                    .padding(start = 6.dp)
+                                    .testTag("settings_version_badge")
                             ) {
                                 Text(
-                                    text = enDigits("ورژن V2"),
+                                    text = enDigits("ورژن V3.0"),
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Color.White,
+                                    maxLines = 1,
+                                    softWrap = false,
                                     modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
                                 )
                             }
@@ -1044,7 +1052,7 @@ fun SettingsDialog(
                         HorizontalDivider(color = Color(0xFFBAE6FD).copy(alpha = 0.7f))
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // بخش ۱: نام سازنده برنامه
+                        // بخش ۱: نام سازنده برنامه همراه با تصویر سازنده
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = Color(0xFFE0F2FE).copy(alpha = 0.55f),
@@ -1059,19 +1067,23 @@ fun SettingsDialog(
                             ) {
                                 Surface(
                                     shape = CircleShape,
-                                    color = Color(0xFF0284C7).copy(alpha = 0.14f),
-                                    modifier = Modifier.size(34.dp)
+                                    color = Color.White,
+                                    border = BorderStroke(2.dp, Color(0xFF0284C7)),
+                                    shadowElevation = 3.dp,
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .testTag("settings_creator_photo")
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Person,
-                                            contentDescription = null,
-                                            tint = Color(0xFF0284C7),
-                                            modifier = Modifier.size(19.dp)
-                                        )
-                                    }
+                                    Image(
+                                        painter = painterResource(id = R.drawable.creator_avatar),
+                                        contentDescription = "عکس سازنده برنامه محمد عظیمی",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(56.dp)
+                                            .clip(CircleShape)
+                                    )
                                 }
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
                                         text = "نام سازنده برنامه:",
@@ -1082,7 +1094,7 @@ fun SettingsDialog(
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text = "محمد عظیمی",
-                                        fontSize = 14.5.sp,
+                                        fontSize = 15.sp,
                                         fontWeight = FontWeight.Black,
                                         color = appTextColor(Color(0xFF0369A1))
                                     )
@@ -1157,7 +1169,7 @@ fun SettingsDialog(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = enDigits("اپلیکیشن مدیریت هزینه • نسخه V2 • سازنده: محمد عظیمی"),
+                        text = enDigits("اپلیکیشن مدیریت هزینه • نسخه V3.0 • سازنده: محمد عظیمی"),
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant)

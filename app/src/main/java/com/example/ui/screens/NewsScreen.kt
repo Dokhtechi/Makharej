@@ -3,7 +3,6 @@ package com.example.ui.screens
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -21,7 +20,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,42 +28,28 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AccessTime
-import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Newspaper
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.foundation.layout.heightIn
-import coil.compose.AsyncImage
-import coil.compose.SubcomposeAsyncImage
-import coil.request.ImageRequest
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,10 +60,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -87,12 +72,12 @@ import com.example.data.model.NewsArticle
 import com.example.data.model.NewsCategory
 import com.example.data.model.NewsSource
 import com.example.ui.theme.OutfitFontFamily
-import com.example.ui.theme.ScaledDialogContent
 import com.example.ui.theme.appSecondaryTextColor
 import com.example.ui.theme.appTextColor
 import com.example.ui.theme.enDigits
 import com.example.ui.theme.scaledDp
 import com.example.ui.viewmodel.ExpenseViewModel
+import com.example.utils.NewsVoicePersona
 import com.example.utils.PersianDateHelper
 
 @Composable
@@ -104,11 +89,32 @@ fun NewsScreen(
     val allNews by viewModel.newsList.collectAsStateWithLifecycle()
     val isLoading by viewModel.isNewsLoading.collectAsStateWithLifecycle()
     val lastUpdated by viewModel.newsLastUpdated.collectAsStateWithLifecycle()
+    val newsError by viewModel.newsErrorMessage.collectAsStateWithLifecycle()
+    val speechState by viewModel.newsSpeechState.collectAsStateWithLifecycle()
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf(NewsCategory.ALL) }
     var selectedSource by remember { mutableStateOf<NewsSource?>(null) }
     var selectedArticleForDetail by remember { mutableStateOf<NewsArticle?>(null) }
+
+    // Refresh live news only once per app launch when first entering the News tab (not on every tab switch)
+    LaunchedEffect(Unit) {
+        viewModel.ensureNewsRefreshedOnAppOpen()
+    }
+
+    LaunchedEffect(speechState.statusMessage) {
+        val msg = speechState.statusMessage
+        if (!msg.isNullOrBlank()) {
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            viewModel.clearNewsSpeechStatus()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.stopSpeakingNews()
+        }
+    }
 
     // Filter news based on category, source, and search query
     val filteredNews = remember(allNews, selectedCategory, selectedSource, searchQuery) {
@@ -123,10 +129,25 @@ fun NewsScreen(
         }
     }
 
-    // In-App News Detail Dialog (شرح کامل خبر بدون نیاز به باز کردن سایت یا تصاویر ناخواسته)
+    // In-App News Detail Dialog (auto-fetches full multi-paragraph article content for rich شرح خبر)
     selectedArticleForDetail?.let { article ->
+        var enrichedArticle by remember(article.id) { mutableStateOf(article) }
+        var isLoadingFullArticle by remember(article.id) { mutableStateOf(false) }
+
+        LaunchedEffect(article.id) {
+            isLoadingFullArticle = true
+            viewModel.loadFullNewsArticle(article) { loaded ->
+                enrichedArticle = loaded
+                isLoadingFullArticle = false
+            }
+        }
+
         NewsDetailDialog(
-            article = article,
+            article = enrichedArticle,
+            isLoadingFullContent = isLoadingFullArticle,
+            speechState = speechState,
+            onToggleSpeak = { viewModel.toggleSpeakNews(enrichedArticle) },
+            onCycleSpeechSpeed = { viewModel.cycleNewsSpeechSpeed() },
             onDismiss = { selectedArticleForDetail = null },
             onOpenBrowser = { url ->
                 try {
@@ -144,7 +165,7 @@ fun NewsScreen(
                         action = Intent.ACTION_SEND
                         putExtra(
                             Intent.EXTRA_TEXT,
-                            "${article.title}\n\n${article.fullContent.ifBlank { article.summary }}\n\nمنبع: ${article.source.displayName}\n${article.url}"
+                            "${enrichedArticle.title}\n\n${enrichedArticle.fullContent.ifBlank { enrichedArticle.summary }}\n\nمنبع: ${enrichedArticle.source.displayName}\n${enrichedArticle.url}"
                         )
                         type = "text/plain"
                     }
@@ -213,7 +234,7 @@ fun NewsScreen(
                                     color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer)
                                 )
                                 Text(
-                                    text = enDigits("7 پایگاه معتبر خبری (فرارو، خبرآنلاین، اقتصاد آنلاین، تابناک، زومیت، آفتاب، سهام نیوز)"),
+                                    text = enDigits("8 پایگاه معتبر خبری و حوادث (رکنا، فرارو، خبرآنلاین، اقتصاد آنلاین، تابناک، زومیت، آفتاب، سهام نیوز)"),
                                     fontSize = 10.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer),
@@ -238,8 +259,9 @@ fun NewsScreen(
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(48.dp)
                                 .clip(CircleShape)
+                                .testTag("news_refresh_button")
                                 .clickable(enabled = !isLoading) {
                                     viewModel.refreshNews()
                                 }
@@ -251,7 +273,7 @@ fun NewsScreen(
                                         contentDescription = "در حال بارگذاری",
                                         tint = Color.White,
                                         modifier = Modifier
-                                            .size(20.dp)
+                                            .size(22.dp)
                                             .rotate(angle)
                                     )
                                 } else {
@@ -259,34 +281,133 @@ fun NewsScreen(
                                         imageVector = Icons.Default.Refresh,
                                         contentDescription = "به‌روزرسانی اخبار",
                                         tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(22.dp)
                                     )
                                 }
                             }
                         }
                     }
 
-                    if (lastUpdated.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccessTime,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = if (isLoading) "در حال دریافت تازه‌ترین اخبار..." else "آخرین به‌روزرسانی:",
+                            fontSize = 11.5.sp,
+                            color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer),
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                        if (!isLoading && lastUpdated.isNotBlank()) {
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(
+                                    text = PersianDateHelper.toEnglishDigits(lastUpdated),
+                                    fontFamily = OutfitFontFamily,
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Black,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    }
+
+                    // Distinct Tehran-Iranian Male & Female Voice Persona Picker (Online Streaming)
+                    if (allNews.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.AccessTime,
-                                contentDescription = null,
+                                imageVector = Icons.Default.RecordVoiceOver,
+                                contentDescription = "انتخاب گوینده خبر",
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(13.dp)
+                                modifier = Modifier.size(15.dp)
                             )
                             Text(
-                                text = enDigits("آخرین به‌روزرسانی: $lastUpdated"),
-                                fontSize = 11.sp,
+                                text = "گوینده:",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Black,
                                 color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer),
-                                fontWeight = FontWeight.Bold
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                            NewsVoicePersona.entries.forEach { persona ->
+                                val selected = speechState.voicePersona == persona
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                    ),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .testTag("voice_persona_${persona.key}")
+                                        .clickable { viewModel.selectNewsVoicePersona(persona) }
+                                ) {
+                                    Text(
+                                        text = persona.shortLabelFa,
+                                        fontSize = 10.sp,
+                                        fontWeight = if (selected) FontWeight.Black else FontWeight.Bold,
+                                        color = if (selected) Color.White else appTextColor(MaterialTheme.colorScheme.onSurface),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (!newsError.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFFFEF2F2),
+                            border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(enabled = !isLoading) { viewModel.refreshNews() }
+                        ) {
+                            Text(
+                                text = newsError!!,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF991B1B),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                             )
                         }
                     }
                 }
+            }
+        }
+
+        // 1.5 Active Persian Voice News Player Bar
+        if (speechState.activeArticleId != null) {
+            item(key = "active_news_speech_bar") {
+                ActiveNewsSpeechBar(
+                    speechState = speechState,
+                    onCycleSpeed = { viewModel.cycleNewsSpeechSpeed() },
+                    onToggleVoice = { viewModel.toggleNewsVoicePersona() },
+                    onStop = { viewModel.stopSpeakingNews() }
+                )
             }
         }
 
@@ -392,7 +513,7 @@ fun NewsScreen(
                         .clickable { selectedSource = null }
                 ) {
                     Text(
-                        text = enDigits("همه منابع (7 پایگاه خبری)"),
+                        text = enDigits("همه منابع (8 پایگاه خبری و حوادث)"),
                         fontSize = 11.5.sp,
                         fontWeight = if (isAllSelected) FontWeight.Black else FontWeight.Bold,
                         color = if (isAllSelected) appTextColor(MaterialTheme.colorScheme.onSecondaryContainer) else appTextColor(MaterialTheme.colorScheme.onSurface),
@@ -472,7 +593,7 @@ fun NewsScreen(
             }
         }
 
-        // Empty state if nothing matches
+        // Loading or Empty state if nothing matches
         if (filteredNews.isEmpty()) {
             item {
                 Card(
@@ -485,29 +606,63 @@ fun NewsScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(32.dp),
+                            .padding(28.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.size(40.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "خبری با این مشخصات یافت نشد",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = appTextColor(MaterialTheme.colorScheme.onSurface)
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "لطفاً عبارت جستجو یا فیلتر دسته‌بندی را تغییر دهید.",
-                            fontSize = 12.sp,
-                            color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                            textAlign = TextAlign.Center
-                        )
+                        if (isLoading && allNews.isEmpty()) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(34.dp),
+                                strokeWidth = 3.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "در حال دریافت تازه‌ترین اخبار...",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = appTextColor(MaterialTheme.colorScheme.onSurface)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(40.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = if (allNews.isEmpty()) "هنوز خبری دریافت نشده است" else "خبری با این مشخصات یافت نشد",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = appTextColor(MaterialTheme.colorScheme.onSurface)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = if (allNews.isEmpty()) {
+                                    "برای دریافت تازه‌ترین اخبار روز دکمه زیر را لمس کنید."
+                                } else {
+                                    "لطفاً عبارت جستجو یا فیلتر دسته‌بندی را تغییر دهید."
+                                },
+                                fontSize = 12.sp,
+                                color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
+                                textAlign = TextAlign.Center
+                            )
+                            if (allNews.isEmpty()) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Button(
+                                    onClick = { viewModel.refreshNews() },
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("دریافت تازه‌ترین اخبار", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -518,8 +673,13 @@ fun NewsScreen(
             items = filteredNews,
             key = { it.id }
         ) { article ->
+            val isSpeakingThis = speechState.activeArticleId == article.id && speechState.isPlaying
+            val isLoadingSpeechThis = speechState.activeArticleId == article.id && speechState.isLoading
             NewsArticleCard(
                 article = article,
+                isSpeaking = isSpeakingThis,
+                isSpeechLoading = isLoadingSpeechThis,
+                onToggleSpeak = { viewModel.toggleSpeakNews(article) },
                 onReadFull = { selectedArticleForDetail = article },
                 onOpenLink = { _ ->
                     val targetUrl = resolveDirectArticleUrl(article)
@@ -550,717 +710,4 @@ fun NewsScreen(
 
         item { Spacer(modifier = Modifier.height(16.dp)) }
     }
-}
-
-@Composable
-fun NewsArticleCard(
-    article: NewsArticle,
-    onReadFull: () -> Unit,
-    onOpenLink: (String) -> Unit,
-    onShare: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val srcColor = Color(article.source.colorHex)
-
-    val categoryColor = when (article.category) {
-        NewsCategory.ECONOMY -> Color(0xFF059669)
-        NewsCategory.POLITICS -> Color(0xFF4338CA)
-        NewsCategory.TECHNOLOGY -> Color(0xFF7C3AED)
-        NewsCategory.SCIENCE -> Color(0xFF0284C7)
-        NewsCategory.CULTURAL -> Color(0xFFD97706)
-        NewsCategory.SOCIAL -> Color(0xFFE11D48)
-        NewsCategory.HEALTH -> Color(0xFF0D9488)
-        NewsCategory.ALL -> MaterialTheme.colorScheme.primary
-    }
-
-    val categoryBg = when (article.category) {
-        NewsCategory.ECONOMY -> Color(0xFFECFDF5)
-        NewsCategory.POLITICS -> Color(0xFFEEF2FF)
-        NewsCategory.TECHNOLOGY -> Color(0xFFF5F3FF)
-        NewsCategory.SCIENCE -> Color(0xFFF0F9FF)
-        NewsCategory.CULTURAL -> Color(0xFFFFFBEB)
-        NewsCategory.SOCIAL -> Color(0xFFFFF1F2)
-        NewsCategory.HEALTH -> Color(0xFFF0FDFA)
-        NewsCategory.ALL -> MaterialTheme.colorScheme.primaryContainer
-    }
-
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag("news_card_${article.id}")
-            .clip(RoundedCornerShape(16.dp))
-            .clickable { onReadFull() },
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        border = BorderStroke(1.4.dp, srcColor)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(scaledDp(14.dp))
-        ) {
-            // Line 1: Source badge + Category badge + Fetch Time (ساعت اخذ خبر)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Source Badge
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = srcColor.copy(alpha = 0.12f),
-                        border = BorderStroke(1.dp, srcColor.copy(alpha = 0.35f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .background(srcColor, CircleShape)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = article.source.displayName,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = srcColor
-                            )
-                        }
-                    }
-
-                    // Category Badge
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = categoryBg
-                    ) {
-                        Text(
-                            text = article.category.displayName,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = categoryColor,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                        )
-                    }
-
-                    if (!article.imageUrl.isNullOrBlank()) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.size(22.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Image,
-                                    contentDescription = "دارای تصویر",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    if (!article.videoUrl.isNullOrBlank()) {
-                        Surface(
-                            shape = CircleShape,
-                            color = Color(0xFFEF4444).copy(alpha = 0.15f),
-                            modifier = Modifier.size(22.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Videocam,
-                                    contentDescription = "دارای ویدیو",
-                                    tint = Color(0xFFEF4444),
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Fetch Time (ساعت اخذ خبر - دقیق و قبل از ساعت جاری دستگاه)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AccessTime,
-                        contentDescription = "ساعت اخذ خبر",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Text(
-                        text = enDigits(article.fetchTime),
-                        fontFamily = OutfitFontFamily,
-                        fontSize = 11.sp,
-                        color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(scaledDp(10.dp)))
-
-            // Line 2: Headline / Title
-            Text(
-                text = enDigits(article.title),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Black,
-                color = appTextColor(MaterialTheme.colorScheme.onSurface),
-                lineHeight = 22.sp
-            )
-
-            Spacer(modifier = Modifier.height(scaledDp(7.dp)))
-
-            // Line 3: Summary under headline
-            Text(
-                text = enDigits(article.summary),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                maxLines = 4,
-                minLines = 4,
-                overflow = TextOverflow.Ellipsis,
-                lineHeight = 20.sp
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Line 4: Action row with "شرح خبر", "مشاهده اصل خبر" and Share icon (بدون جمله مطالعه شرح کامل خبر)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                        RoundedCornerShape(10.dp)
-                    )
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Button 1: In-App News Content Reader ("شرح خبر")
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onReadFull() }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = scaledDp(10.dp), vertical = scaledDp(5.dp)),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.MenuBook,
-                                contentDescription = "مشاهده شرح خبر",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(scaledDp(14.dp))
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = "شرح خبر",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                softWrap = true
-                            )
-                        }
-                    }
-
-                    // Button 2: Direct Source News Link ("مشاهده اصل خبر")
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onOpenLink(resolveDirectArticleUrl(article)) }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = scaledDp(10.dp), vertical = scaledDp(5.dp)),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = "مشاهده اصل خبر",
-                                tint = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                                modifier = Modifier.size(scaledDp(13.dp))
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "مشاهده اصل خبر",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = appTextColor(MaterialTheme.colorScheme.onSurface),
-                                maxLines = 1,
-                                softWrap = true
-                            )
-                        }
-                    }
-                }
-
-                // Button 3: Share News
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                    modifier = Modifier
-                        .size(scaledDp(30.dp))
-                        .clip(CircleShape)
-                        .clickable { onShare() }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = "اشتراک‌گذاری خبر",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(15.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Resolves the direct URL to the specific news article on the source website.
- * If the stored URL is a direct article link, it is used immediately.
- * If the URL is only a generic homepage, internal website searches fail or redirect to the root page;
- * in that case, we open targeted Google Search with the exact headline and source name,
- * ensuring the user lands directly on that specific article without being redirected to the homepage.
- */
-fun resolveDirectArticleUrl(article: NewsArticle): String {
-    val raw = article.url.trim()
-    val isGenericRoot = raw.equals("https://www.zoomit.ir", ignoreCase = true) ||
-            raw.equals("https://www.zoomit.ir/", ignoreCase = true) ||
-            raw.equals("https://www.khabaronline.ir", ignoreCase = true) ||
-            raw.equals("https://www.khabaronline.ir/", ignoreCase = true) ||
-            raw.equals("https://www.tabnak.ir", ignoreCase = true) ||
-            raw.equals("https://www.tabnak.ir/", ignoreCase = true) ||
-            raw.equals("https://fararu.com", ignoreCase = true) ||
-            raw.equals("https://fararu.com/", ignoreCase = true) ||
-            raw.equals("https://www.fararu.ir", ignoreCase = true) ||
-            raw.equals("https://www.fararu.ir/", ignoreCase = true) ||
-            raw.equals("https://aftabnews.ir", ignoreCase = true) ||
-            raw.equals("https://aftabnews.ir/", ignoreCase = true) ||
-            raw.equals("https://www.eghtesadonline.com", ignoreCase = true) ||
-            raw.equals("https://www.eghtesadonline.com/", ignoreCase = true) ||
-            raw.equals("https://sahamnews.org", ignoreCase = true) ||
-            raw.equals("https://sahamnews.org/", ignoreCase = true) ||
-            raw.equals(article.source.websiteUrl, ignoreCase = true) ||
-            raw.equals("${article.source.websiteUrl}/", ignoreCase = true) ||
-            raw.length <= article.source.websiteUrl.length + 3
-
-    val hasDirectArticlePath = raw.contains("/news/") ||
-            raw.contains("/fa/news/") ||
-            raw.contains("/fa/tiny/") ||
-            raw.contains("/article/") ||
-            raw.contains("/post/") ||
-            raw.contains("/item/") ||
-            raw.contains("?p=")
-
-    // If it is already a direct deep link to the story, open it directly
-    if (!isGenericRoot && hasDirectArticlePath) {
-        return raw
-    }
-
-    // Direct search targeted to the exact news story on Google so the user sees and opens that exact page
-    val searchTarget = "${article.title.trim()} ${article.source.displayName}"
-    return "https://www.google.com/search?q=" + Uri.encode(searchTarget)
-}
-
-/**
- * Dedicated In-App News Detail Reader Dialog.
- * Displays the complete, rich news story without distracting web ads or banners.
- */
-@Composable
-fun NewsDetailDialog(
-    article: NewsArticle,
-    onDismiss: () -> Unit,
-    onOpenBrowser: (String) -> Unit,
-    onShare: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = null,
-        text = {
-            ScaledDialogContent {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    // Header tags: Source + Time
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val srcColor = Color(article.source.colorHex)
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = srcColor.copy(alpha = 0.15f),
-                            border = BorderStroke(1.dp, srcColor.copy(alpha = 0.4f))
-                        ) {
-                            Text(
-                                text = article.source.displayName,
-                                color = srcColor,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = scaledDp(8.dp), vertical = scaledDp(4.dp))
-                            )
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AccessTime,
-                                contentDescription = null,
-                                tint = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                                modifier = Modifier.size(scaledDp(13.dp))
-                            )
-                            Text(
-                                text = enDigits(article.fetchTime),
-                                fontFamily = OutfitFontFamily,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(scaledDp(12.dp)))
-
-                    // News Headline
-                    Text(
-                        text = enDigits(article.title),
-                        fontSize = 16.5.sp,
-                        fontWeight = FontWeight.Black,
-                        color = appTextColor(MaterialTheme.colorScheme.onSurface),
-                        lineHeight = 24.sp
-                    )
-
-                // Optional Photo attached to the news article (نمایش کامل و مطمئن عکس در شرح خبر)
-                if (!article.imageUrl.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    val ctx = LocalContext.current
-                    val imageRequest = remember(article.imageUrl) {
-                        ImageRequest.Builder(ctx)
-                            .data(article.imageUrl)
-                            .setHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                            .crossfade(true)
-                            .build()
-                    }
-
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 140.dp, max = 220.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    ) {
-                        Box(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            SubcomposeAsyncImage(
-                                model = imageRequest,
-                                contentDescription = article.title,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 140.dp, max = 220.dp)
-                                    .clip(RoundedCornerShape(14.dp)),
-                                loading = {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(160.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(28.dp),
-                                            strokeWidth = 2.5.dp,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                },
-                                error = {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(140.dp)
-                                            .background(Color(article.source.colorHex).copy(alpha = 0.1f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Icon(
-                                                imageVector = Icons.Default.Image,
-                                                contentDescription = null,
-                                                tint = Color(article.source.colorHex),
-                                                modifier = Modifier.size(36.dp)
-                                            )
-                                            Spacer(modifier = Modifier.height(6.dp))
-                                            Text(
-                                                text = "تصویر گزارش پایگاه خبری ${article.source.displayName}",
-                                                fontSize = 11.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color(article.source.colorHex)
-                                            )
-                                        }
-                                    }
-                                }
-                            )
-
-                            Surface(
-                                shape = RoundedCornerShape(bottomStart = 8.dp),
-                                color = Color.Black.copy(alpha = 0.65f),
-                                modifier = Modifier.align(Alignment.TopEnd)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Image,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "تصویر خبر",
-                                        fontSize = 10.sp,
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Optional Video attached to the news article (نمایش ویدیو در شرح کامل خبر مستقیماً از خود سایت منشا خبر - بدون آپارات)
-                if (!article.videoUrl.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    val ctx = LocalContext.current
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF1F2)),
-                        border = BorderStroke(1.2.dp, Color(0xFFFDA4AF)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable {
-                                try {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(article.videoUrl))
-                                    ctx.startActivity(intent)
-                                } catch (_: Exception) {
-                                    Toast.makeText(ctx, "امکان باز کردن صفحه ویدیوی منبع وجود ندارد", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = Color(0xFFE11D48),
-                                modifier = Modifier.size(42.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.PlayArrow,
-                                        contentDescription = "پخش آنلاین ویدیو از سایت منبع",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "ویدیو گزارش رسمی در ${article.source.displayName}",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF9F1239)
-                                )
-                                Text(
-                                    text = "مشاهده مستقیم ویدیو در پایگاه خبری ${article.source.displayName} (${article.source.websiteUrl})",
-                                    fontSize = 10.5.sp,
-                                    color = Color(0xFFBE123C)
-                                )
-                            }
-
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = null,
-                                tint = Color(0xFFE11D48),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Full News Explanation / Content (شرح کامل خبر)
-                val displayContent = article.fullContent.ifBlank { article.summary }
-                Text(
-                    text = enDigits(displayContent),
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    lineHeight = 24.sp,
-                    color = appTextColor(MaterialTheme.colorScheme.onSurface)
-                )
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Direct Link Banner to Source Article Page
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                    border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onOpenBrowser(resolveDirectArticleUrl(article)) }
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "مشاهده متن خبر در وبسایت منبع",
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    softWrap = true
-                                )
-                                Text(
-                                    text = "باز کردن مستقیم صفحه اختصاصی این خبر در ${article.source.displayName}",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                                    softWrap = true
-                                )
-                            }
-                        }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-                }
-            }
-        },
-        confirmButton = {
-            ScaledDialogContent {
-                Button(
-                    onClick = onDismiss,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .heightIn(min = scaledDp(38.dp))
-                        .padding(horizontal = 4.dp)
-                ) {
-                    Text(
-                        text = "بستن",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White,
-                        maxLines = 1,
-                        softWrap = true
-                    )
-                }
-            }
-        },
-        dismissButton = {
-            ScaledDialogContent {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    TextButton(
-                        onClick = { onOpenBrowser(resolveDirectArticleUrl(article)) }
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                            contentDescription = null,
-                            modifier = Modifier.size(scaledDp(15.dp))
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "مشاهده اصل خبر",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = true
-                        )
-                    }
-
-                    IconButton(
-                        onClick = onShare,
-                        modifier = Modifier.size(scaledDp(36.dp))
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = "اشتراک‌گذاری خبر",
-                            modifier = Modifier.size(scaledDp(18.dp))
-                        )
-                    }
-                }
-            }
-        },
-        shape = RoundedCornerShape(20.dp)
-    )
 }

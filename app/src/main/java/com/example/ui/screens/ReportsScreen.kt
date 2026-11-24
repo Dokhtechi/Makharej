@@ -119,6 +119,29 @@ fun ReportsScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val allExpandedExpenses by viewModel.allExpandedExpenses.collectAsStateWithLifecycle()
     val yearMonthSummaries by viewModel.yearMonthSummaries.collectAsStateWithLifecycle()
+    val annualExpenses by viewModel.annualExpenses.collectAsStateWithLifecycle()
+
+    val isAnnualFolderSelected = remember(selectedFolder) {
+        selectedFolder != null && FolderMatcher.getCanonicalGroupId(selectedFolder!!) == "ANNUAL"
+    }
+    val sortedAnnualCommitments = remember(annualExpenses) {
+        annualExpenses
+            .filter { it.isAnnual && it.amount > 0L }
+            .sortedWith(compareByDescending<ExpenseEntity> { it.amount }.thenBy { it.title })
+    }
+    val annualCommitmentsTotal = remember(sortedAnnualCommitments) {
+        sortedAnnualCommitments.sumOf { it.amount }
+    }
+    val annualCommitmentSummaries = remember(sortedAnnualCommitments) {
+        AnnualCommitmentsReportHelper.buildAnnualCommitmentSummaries(sortedAnnualCommitments)
+    }
+    val selectedFolderItemSummaries = remember(selectedFolder, folderExpenses, isAnnualFolderSelected) {
+        if (selectedFolder == null || isAnnualFolderSelected) {
+            emptyList()
+        } else {
+            AnnualCommitmentsReportHelper.buildSelectedFolderItemSummaries(folderExpenses)
+        }
+    }
 
     val filteredSearchResults = remember(searchQuery, allExpandedExpenses) {
         if (searchQuery.isBlank()) {
@@ -928,7 +951,7 @@ fun ReportsScreen(
             }
         }
 
-        // Summary Card for this Report (Compact & Proportionate)
+        // Summary Card for this Report (Compact, Proportionate, Zero Vertical Number Wrapping)
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -939,53 +962,91 @@ fun ReportsScreen(
                 border = BorderStroke(1.5.dp, Color(0xFF10B981)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = scaledDp(14.dp), vertical = scaledDp(9.dp)),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = scaledDp(14.dp), vertical = scaledDp(10.dp)),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Column {
-                        val title = if (selectedFolder != null) "گزارش اختصاصی «$selectedFolder»" else "جمع کل در این بازه:"
-                        Text(
-                            text = title,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        val currentTotal = if (selectedFolder != null) folderTotalAmount else totalAmount
-                        Text(
-                            text = enDigits(PersianDateHelper.formatCurrency(currentTotal)),
-                            fontSize = 17.5.sp,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                    val title = when {
+                        isAnnualFolderSelected -> "گزارش اختصاصی «تعهدات سالانه»"
+                        selectedFolder != null -> "گزارش اختصاصی «$selectedFolder»"
+                        else -> "جمع کل در این بازه:"
+                    }
+                    val countBadgeText = if (isAnnualFolderSelected) {
+                        "${sortedAnnualCommitments.size} تعهد سالانه"
+                    } else {
+                        "${folderExpenses.size} تراکنش"
+                    }
+                    val currentTotal = when {
+                        isAnnualFolderSelected -> annualCommitmentsTotal
+                        selectedFolder != null -> folderTotalAmount
+                        else -> totalAmount
+                    }
+                    val secondaryMetricText = when {
+                        isAnnualFolderSelected -> "سهم ماهانه: ${PersianDateHelper.formatCurrency(annualCommitmentsTotal / 12L)}/ماه"
+                        selectedFolder != null -> "میانگین: ${PersianDateHelper.formatCurrency(averageMonthlyAmount)}/ماه"
+                        else -> "${folderSummaries.size} پوشه فعال"
                     }
 
-                    Column(horizontalAlignment = Alignment.End) {
+                    // Row 1: Full title (weight 1f so it never squeezes the badge) + non-wrapping count pill
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = enDigits("${folderExpenses.size} تراکنش"),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer)
+                            text = title,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer),
+                            softWrap = true,
+                            modifier = Modifier.weight(1f)
                         )
-                        if (selectedFolder != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                            border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.45f))
+                        ) {
                             Text(
-                                text = enDigits("میانگین: ${PersianDateHelper.formatCurrency(averageMonthlyAmount)}/ماه"),
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        } else {
-                            Text(
-                                text = enDigits("${folderSummaries.size} پوشه فعال"),
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer)
+                                text = enDigits(countBadgeText),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer),
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                             )
                         }
+                    }
+
+                    // Row 2: Total amount & monthly average cleanly separated on horizontal lines (zero vertical digit breaks)
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = enDigits(PersianDateHelper.formatCurrency(currentTotal)),
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                        Text(
+                            text = enDigits(secondaryMetricText),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (selectedFolder != null || isAnnualFolderSelected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                appTextColor(MaterialTheme.colorScheme.onPrimaryContainer)
+                            },
+                            maxLines = 1,
+                            softWrap = false
+                        )
                     }
                 }
             }
@@ -1020,7 +1081,10 @@ fun ReportsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.ShowChart,
                                 contentDescription = null,
@@ -1032,15 +1096,20 @@ fun ReportsScreen(
                                 text = if (selectedFolder != null) "تفکیک ماه به ماه پوشه «$selectedFolder»:" else "تفکیک ماه به ماه هزینه‌ها در این بازه:",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = appTextColor(MaterialTheme.colorScheme.onSurface)
+                                color = appTextColor(MaterialTheme.colorScheme.onSurface),
+                                softWrap = true
                             )
                         }
+
+                        Spacer(modifier = Modifier.width(8.dp))
 
                         Text(
                             text = enDigits("${monthlyBreakdown.size} ماه"),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
 
@@ -1189,7 +1258,8 @@ fun ReportsScreen(
                                                     fontSize = 15.sp,
                                                     fontWeight = FontWeight.Black,
                                                     color = folderColor,
-                                                    softWrap = true
+                                                    maxLines = 1,
+                                                    softWrap = false
                                                 )
 
                                                 Text(
@@ -1197,7 +1267,8 @@ fun ReportsScreen(
                                                     fontSize = 11.5.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                                                    softWrap = true
+                                                    maxLines = 1,
+                                                    softWrap = false
                                                 )
                                             }
                                         }
@@ -1218,6 +1289,161 @@ fun ReportsScreen(
                         viewModel.selectReportFolder(folder.folderName)
                     }
                 )
+            }
+        } else if (isAnnualFolderSelected) {
+            // وقتی «تعهدات سالانه» انتخاب شده: نمایش لیست کامل و دقیق تمام تعهدات سالانه با سهم درصدی دقیق
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = enDigits("لیست کامل تعهدات سالانه (${sortedAnnualCommitments.size} مورد):"),
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Black,
+                            color = appTextColor(MaterialTheme.colorScheme.onSurface),
+                            softWrap = true
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { viewModel.selectReportFolder(null) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "بازگشت به همه پوشه‌ها",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "← بازگشت به نمایش همه پوشه‌ها و نمودار",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    softWrap = true
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (sortedAnnualCommitments.isEmpty()) {
+                item {
+                    Text(
+                        text = "هیچ تعهد سالانه‌ای ثبت نشده است",
+                        fontSize = 12.5.sp,
+                        color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                }
+            } else {
+                items(
+                    items = sortedAnnualCommitments.indices.toList(),
+                    key = { idx -> "annual_commitment_${sortedAnnualCommitments[idx].id}" }
+                ) { idx ->
+                    val entity = sortedAnnualCommitments[idx]
+                    val sliceColor = com.example.ui.components.VibrantPieColors[idx % com.example.ui.components.VibrantPieColors.size]
+                    val pct = if (annualCommitmentsTotal > 0L) {
+                        (entity.amount.toDouble() / annualCommitmentsTotal.toDouble()) * 100.0
+                    } else 0.0
+                    val monthlyShare = entity.amount / 12L
+
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { onEditExpense(entity) }
+                            .testTag("annual_report_commitment_${entity.id}"),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.4.dp, sliceColor.copy(alpha = 0.8f)),
+                        shadowElevation = 1.dp
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(11.dp)
+                                            .clip(CircleShape)
+                                            .background(sliceColor)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = enDigits("${idx + 1}. ${entity.title}"),
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = appTextColor(MaterialTheme.colorScheme.onSurface),
+                                        maxLines = 2,
+                                        softWrap = true
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(7.dp),
+                                    color = sliceColor.copy(alpha = 0.16f),
+                                    border = BorderStroke(1.dp, sliceColor.copy(alpha = 0.5f))
+                                ) {
+                                    Text(
+                                        text = enDigits(com.example.ui.components.formatPiePercentage(pct)),
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = sliceColor,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = enDigits("مبلغ سالانه: ${PersianDateHelper.formatCurrency(entity.amount)}"),
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = sliceColor
+                                )
+                                Text(
+                                    text = enDigits("ماهانه: ${PersianDateHelper.formatCurrency(monthlyShare)}"),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant)
+                                )
+                            }
+                        }
+                    }
+                }
             }
         } else {
             // وقتی یک پوشه خاص انتخاب شده است: نمایش ریز مخارج آن پوشه همراه با دکمه افقی در زیر عنوان اصلی
@@ -1319,13 +1545,37 @@ fun ReportsScreen(
             }
         }
 
-        // پای‌چارت دایره‌ای (Pie Chart) در انتهای تب گزارش‌ها
+        // پای‌چارت دایره‌ای (Pie Chart) در انتهای تب گزارش‌ها — کاملاً منطبق با پوشه یا تعهدات سالانه انتخابی
         item {
             Spacer(modifier = Modifier.height(8.dp))
-            ExpensePieChartCard(
-                folderSummaries = activeFolderSummaries,
-                totalAmount = totalAmount
-            )
+            when {
+                isAnnualFolderSelected -> {
+                    ExpensePieChartCard(
+                        folderSummaries = annualCommitmentSummaries,
+                        totalAmount = annualCommitmentsTotal,
+                        title = "نمودار سهم تعهدات سالانه (پای‌چارت دایره‌ای)",
+                        subtitle = "تفکیک دقیق تمام ${sortedAnnualCommitments.size} تعهد سالانه بر اساس مبلغ هر تعهد",
+                        legendTitle = "لیست تعهدات سالانه و سهم درصدی هر تعهد:",
+                        centerLabel = "مجموع تعهدات"
+                    )
+                }
+                selectedFolder != null -> {
+                    ExpensePieChartCard(
+                        folderSummaries = selectedFolderItemSummaries,
+                        totalAmount = folderTotalAmount,
+                        title = "نمودار سهم مخارج پوشه «$selectedFolder»",
+                        subtitle = "توزیع درصد هزینه‌های ثبت‌شده در پوشه «$selectedFolder»",
+                        legendTitle = "راهنمای اقلام پوشه «$selectedFolder» و سهم درصدی:",
+                        centerLabel = "مجموع پوشه"
+                    )
+                }
+                else -> {
+                    ExpensePieChartCard(
+                        folderSummaries = activeFolderSummaries,
+                        totalAmount = totalAmount
+                    )
+                }
+            }
         }
 
         item { Spacer(modifier = Modifier.height(70.dp)) }
@@ -1382,176 +1632,3 @@ ReportsTabSection.ANNUAL_CALENDAR -> {
     }
 }
 
-@Composable
-private fun MonthBreakdownRow(
-    item: MonthlyBreakdownItem,
-    onEditExpense: (ExpenseEntity) -> Unit,
-    onDeleteExpense: (ExpenseEntity) -> Unit
-) {
-    val progress = (item.percentageOfTotal / 100f).coerceIn(0f, 1f)
-    var isMonthExpanded by rememberSaveable(item.yearMonthLabel) { mutableStateOf(false) }
-    var expandedInnerGroups by rememberSaveable(item.yearMonthLabel) { mutableStateOf(listOf<String>()) }
-    val groupedMonthItems = remember(item.transactions) {
-        val sorted = item.transactions.sortedWith(
-            compareByDescending<com.example.data.model.ResolvedExpense> { it.entity.shamsiDateString }
-                .thenByDescending { it.entity.timestamp }
-                .thenByDescending { it.entity.id }
-        )
-        CurrentMonthExpenseGrouper.groupExpenses(sorted)
-    }
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(enabled = item.transactions.isNotEmpty()) {
-                isMonthExpanded = !isMonthExpanded
-            }
-            .testTag("month_breakdown_row_${item.year}_${item.month}"),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.3.dp, Color(0xFFF43F5E).copy(alpha = 0.7f))
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.padding(end = 8.dp)
-                    ) {
-                        Text(
-                            text = enDigits(item.yearMonthLabel),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = scaledDp(8.dp), vertical = scaledDp(4.dp))
-                        )
-                    }
-
-                    Text(
-                        text = enDigits("${item.transactionCount} تراکنش"),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                        softWrap = true
-                    )
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = enDigits(PersianDateHelper.formatCurrency(item.totalAmount)),
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Black,
-                            color = if (item.totalAmount > 0) appTextColor(MaterialTheme.colorScheme.onSurface) else appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                            softWrap = true
-                        )
-                        if (item.totalAmount > 0) {
-                            Text(
-                                text = enDigits("${item.percentageOfTotal.toInt()}% از کل بازه"),
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                    if (item.transactions.isNotEmpty()) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            imageVector = if (isMonthExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = if (isMonthExpanded) "بستن ریز هزینه‌های ماه" else "مشاهده ریز هزینه‌های ماه",
-                            tint = Color(0xFFF43F5E),
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Visual progress bar of this month's share
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(fraction = progress.coerceAtLeast(0.02f))
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(if (item.totalAmount > 0) MaterialTheme.colorScheme.primary else Color.Transparent)
-                )
-            }
-
-            // Expandable grouped expenses inside this month (e.g. "نانوایی" unified with sum & dropdown)
-            AnimatedVisibility(visible = isMonthExpanded && groupedMonthItems.isNotEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    HorizontalDivider(color = Color(0xFFF43F5E).copy(alpha = 0.25f))
-                    Text(
-                        text = enDigits("ریز هزینه‌های ${item.yearMonthLabel} (${groupedMonthItems.size} دسته):"),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        softWrap = true
-                    )
-
-                    groupedMonthItems.forEach { group ->
-                        if (!group.isAnnual && group.items.size == 1) {
-                            val singleItem = group.items.first()
-                            ExpenseItemCard(
-                                resolvedExpense = singleItem,
-                                onDeleteClick = { onDeleteExpense(singleItem.entity) },
-                                onEditClick = { onEditExpense(singleItem.entity) }
-                            )
-                        } else {
-                            val isInnerExpanded = expandedInnerGroups.contains(group.groupKey)
-                            GroupedExpenseDropdownCard(
-                                group = group,
-                                isExpanded = isInnerExpanded,
-                                onToggleExpand = {
-                                    expandedInnerGroups = if (isInnerExpanded) {
-                                        expandedInnerGroups - group.groupKey
-                                    } else {
-                                        expandedInnerGroups + group.groupKey
-                                    }
-                                },
-                                onEditItem = onEditExpense,
-                                onDeleteItem = onDeleteExpense
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun shareCsv(context: Context, csvContent: String) {
-    try {
-        val sendIntent: Intent = Intent().apply {
-            action = Intent.ACTION_SEND
-            putExtra(Intent.EXTRA_TEXT, csvContent)
-            type = "text/plain"
-        }
-        val shareIntent = Intent.createChooser(sendIntent, "اشتراک‌گذاری گزارش هزینه‌ها")
-        context.startActivity(shareIntent)
-    } catch (e: Exception) {
-        Toast.makeText(context, "خطا در اشتراک‌گذاری گزارش", Toast.LENGTH_SHORT).show()
-    }
-}

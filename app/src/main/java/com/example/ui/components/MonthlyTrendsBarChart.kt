@@ -683,12 +683,14 @@ fun MonthlyTrendsBarChart(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Bottom Reference Metrics Cards (Clean 3-Column stats)
+                // Bottom Reference Metrics Cards (Clean 3-Column stats, zero vertical digit wrapping)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     // 1. Average Monthly Spend
+                    val avgNumStr = PersianDateHelper.formatCurrency(averageSpend, includeUnit = false)
+                    val avgFontSize = if (avgNumStr.length >= 10) 10.sp else 11.5.sp
                     Surface(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp),
@@ -698,18 +700,30 @@ fun MonthlyTrendsBarChart(
                         Column(modifier = Modifier.padding(scaledDp(7f))) {
                             Text(
                                 text = "میانگین ماهانه:",
-                                fontSize = 10.sp,
+                                fontSize = 9.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                                softWrap = true
+                                maxLines = 1,
+                                softWrap = false
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = enDigits(PersianDateHelper.formatCurrency(averageSpend)),
-                                fontSize = 11.5.sp,
+                                text = avgNumStr,
+                                fontFamily = OutfitFontFamily,
+                                fontSize = avgFontSize,
                                 fontWeight = FontWeight.Black,
                                 color = Color(0xFF0369A1),
-                                softWrap = true
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "تومان",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0369A1).copy(alpha = 0.8f),
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -724,10 +738,11 @@ fun MonthlyTrendsBarChart(
                         Column(modifier = Modifier.padding(scaledDp(7f))) {
                             Text(
                                 text = "اوج مخارج:",
-                                fontSize = 10.sp,
+                                fontSize = 9.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF92400E),
-                                softWrap = true
+                                maxLines = 1,
+                                softWrap = false
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
@@ -735,12 +750,24 @@ fun MonthlyTrendsBarChart(
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Black,
                                 color = Color(0xFFB45309),
-                                softWrap = true
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "بیشترین ماه",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFB45309).copy(alpha = 0.75f),
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
 
                     // 3. Total Period Budget
+                    val totalNumStr = PersianDateHelper.formatCurrency(grandTotal, includeUnit = false)
+                    val totalFontSize = if (totalNumStr.length >= 10) 10.sp else 11.5.sp
                     Surface(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp),
@@ -750,18 +777,30 @@ fun MonthlyTrendsBarChart(
                         Column(modifier = Modifier.padding(scaledDp(7f))) {
                             Text(
                                 text = "کل مخارج دوره:",
-                                fontSize = 10.sp,
+                                fontSize = 9.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                                softWrap = true
+                                maxLines = 1,
+                                softWrap = false
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = enDigits(PersianDateHelper.formatCurrency(grandTotal)),
-                                fontSize = 11.5.sp,
+                                text = totalNumStr,
+                                fontFamily = OutfitFontFamily,
+                                fontSize = totalFontSize,
                                 fontWeight = FontWeight.Black,
                                 color = Color(0xFF047857),
-                                softWrap = true
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "تومان",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF047857).copy(alpha = 0.8f),
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }

@@ -43,6 +43,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.ExpenseEntity
 import com.example.data.model.MonthSummary
@@ -53,6 +56,9 @@ import com.example.ui.theme.enDigits
 import com.example.ui.theme.scaledDp
 import com.example.ui.viewmodel.ExpenseViewModel
 import com.example.utils.PersianDateHelper
+
+private val AnnualCalendarCurrentColor = Color(0xFF059669) // Emerald green for هزینه جاری
+private val AnnualCalendarTotalColor = Color(0xFF7C3AED)   // Royal violet for هزینه کل
 
 @Composable
 fun AnnualCalendarScreen(
@@ -77,6 +83,7 @@ fun AnnualCalendarScreen(
         val currentMonth = clockState.shamsiDate.month
 
         val highestMonthExpense = monthSummaries.maxOfOrNull { it.totalExpense }?.coerceAtLeast(1L) ?: 1L
+        val totalYearDirectExpenses = monthSummaries.sumOf { it.directExpenseTotal }
         val totalYearExpenses = monthSummaries.sumOf { it.totalExpense }
 
         Column(
@@ -136,12 +143,32 @@ fun AnnualCalendarScreen(
                                 )
                             }
                             Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = enDigits(PersianDateHelper.formatCurrency(totalYearExpenses)),
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = enDigits(PersianDateHelper.formatCurrency(totalYearDirectExpenses, includeUnit = false)),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = AnnualCalendarCurrentColor,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                                Text(
+                                    text = "|",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                                Text(
+                                    text = enDigits(PersianDateHelper.formatCurrency(totalYearExpenses, includeUnit = false)),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = AnnualCalendarTotalColor,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
 
                         // Next Year Button (Opposing Arrow on the left)
@@ -212,7 +239,67 @@ fun AnnualCalendarScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Compact 1-line color legend: Green = هزینه جاری | Violet = هزینه کل
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("annual_calendar_color_legend"),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(9.dp)
+                            .clip(CircleShape)
+                            .background(AnnualCalendarCurrentColor)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = "هزینه جاری",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        color = AnnualCalendarCurrentColor,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(9.dp)
+                            .clip(CircleShape)
+                            .background(AnnualCalendarTotalColor)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = "هزینه کل",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        color = AnnualCalendarTotalColor,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "(تومان)",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
 
             // 12 Persian Months Grid - 3 columns x 4 rows fits completely on screen
             LazyVerticalGrid(
@@ -306,30 +393,92 @@ fun CompactMonthCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(5.dp))
 
-            // Total amount
-            Text(
-                text = enDigits(PersianDateHelper.formatCurrency(summary.totalExpense)),
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.Black,
-                color = if (summary.totalExpense > 0) MaterialTheme.colorScheme.primary else appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                lineHeight = 15.sp,
-                softWrap = true
-            )
+            // Dual color-coded amounts: Green = هزینه جاری ماه | Violet = هزینه کل ماه (بدون متن اضافی)
+            val directStr = PersianDateHelper.formatCurrency(summary.directExpenseTotal, includeUnit = false)
+            val totalStr = PersianDateHelper.formatCurrency(summary.totalExpense, includeUnit = false)
+            val maxLen = maxOf(directStr.length, totalStr.length)
+            val amountFontSize = when {
+                maxLen >= 11 -> 10.sp
+                maxLen >= 9 -> 10.8.sp
+                else -> 11.5.sp
+            }
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                // Row 1: هزینه جاری (Emerald Green)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.5.dp)
+                            .clip(CircleShape)
+                            .background(AnnualCalendarCurrentColor)
+                    )
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Text(
+                            text = directStr,
+                            fontFamily = OutfitFontFamily,
+                            fontSize = amountFontSize,
+                            lineHeight = (amountFontSize.value + 3f).sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (summary.directExpenseTotal > 0L) AnnualCalendarCurrentColor
+                            else appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                // Row 2: هزینه کل (Royal Violet)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.5.dp)
+                            .clip(CircleShape)
+                            .background(AnnualCalendarTotalColor)
+                    )
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Text(
+                            text = totalStr,
+                            fontFamily = OutfitFontFamily,
+                            fontSize = amountFontSize,
+                            lineHeight = (amountFontSize.value + 3f).sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (summary.totalExpense > 0L) AnnualCalendarTotalColor
+                            else appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(4.dp))
 
             // Transaction count
             Text(
                 text = enDigits("${summary.transactionCount} تراکنش"),
-                fontSize = 10.sp,
+                fontSize = 9.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                softWrap = true
+                maxLines = 1,
+                softWrap = false
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(5.dp))
 
             // Mini progress bar
             Box(

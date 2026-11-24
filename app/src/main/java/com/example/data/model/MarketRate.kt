@@ -11,49 +11,53 @@ data class MarketRateItem(
     val unitLabel: String = "تومان",
     val displayPriceFormatted: String? = null,
     val displayDiffFormatted: String? = null,
-    val sourceLabel: String = ""
+    val sourceLabel: String = "TGJU (tgju.org/coin)"
 )
 
 data class MarketRatesState(
     val dollar: MarketRateItem = MarketRateItem(
-        key = "dollar",
+        key = "price_dollar_rl",
         title = "دلار",
         priceTomans = 0L,
         changePercent = 0.0,
         changeTomans = 0L,
         isPositiveChange = true,
         timeFormatted = "",
-        sourceLabel = "بله"
+        unitLabel = "تومان",
+        sourceLabel = "TGJU (tgju.org/coin)"
     ),
     val euro: MarketRateItem = MarketRateItem(
-        key = "euro",
+        key = "price_eur",
         title = "یورو",
         priceTomans = 0L,
         changePercent = 0.0,
         changeTomans = 0L,
         isPositiveChange = true,
         timeFormatted = "",
-        sourceLabel = "بله"
+        unitLabel = "تومان",
+        sourceLabel = "TGJU (tgju.org/coin)"
     ),
     val sekehEmami: MarketRateItem = MarketRateItem(
-        key = "retail_sekee",
+        key = "sekee",
         title = "سکه امامی",
         priceTomans = 0L,
         changePercent = 0.0,
         changeTomans = 0L,
         isPositiveChange = true,
         timeFormatted = "",
-        sourceLabel = "بله"
+        unitLabel = "تومان",
+        sourceLabel = "TGJU (tgju.org/coin)"
     ),
     val robSekeh: MarketRateItem = MarketRateItem(
-        key = "retail_rob",
+        key = "rob",
         title = "ربع سکه",
         priceTomans = 0L,
         changePercent = 0.0,
         changeTomans = 0L,
         isPositiveChange = true,
         timeFormatted = "",
-        sourceLabel = "بله"
+        unitLabel = "تومان",
+        sourceLabel = "TGJU (tgju.org/coin)"
     ),
     val goldOunce: MarketRateItem = MarketRateItem(
         key = "ons",
@@ -66,17 +70,18 @@ data class MarketRatesState(
         unitLabel = "دلار",
         displayPriceFormatted = null,
         displayDiffFormatted = null,
-        sourceLabel = "بله"
+        sourceLabel = "TGJU (tgju.org/coin)"
     ),
     val gold18k: MarketRateItem = MarketRateItem(
-        key = "geram16",
-        title = "طلای 16 عیار",
+        key = "geram18",
+        title = "طلای 18 عیار",
         priceTomans = 0L,
         changePercent = 0.0,
         changeTomans = 0L,
         isPositiveChange = true,
         timeFormatted = "",
-        sourceLabel = "بله"
+        unitLabel = "تومان",
+        sourceLabel = "TGJU (tgju.org/coin)"
     ),
     val bitcoin: MarketRateItem = MarketRateItem(
         key = "crypto-bitcoin",
@@ -89,10 +94,10 @@ data class MarketRatesState(
         unitLabel = "دلار",
         displayPriceFormatted = null,
         displayDiffFormatted = null,
-        sourceLabel = "بله"
+        sourceLabel = "TGJU (tgju.org/coin)"
     ),
     val tether: MarketRateItem = MarketRateItem(
-        key = "crypto-tether",
+        key = "asiya-usdt",
         title = "تتر (USDT)",
         priceTomans = 0L,
         changePercent = 0.0,
@@ -100,7 +105,7 @@ data class MarketRatesState(
         isPositiveChange = true,
         timeFormatted = "",
         unitLabel = "تومان",
-        sourceLabel = "بله"
+        sourceLabel = "Asiya Exchange (asiyaexchange.com)"
     ),
     val crudeOil: MarketRateItem = MarketRateItem(
         key = "oil_brent",
@@ -113,7 +118,7 @@ data class MarketRatesState(
         unitLabel = "دلار",
         displayPriceFormatted = null,
         displayDiffFormatted = null,
-        sourceLabel = "TGJU"
+        sourceLabel = "TGJU (tgju.org/coin)"
     ),
     val bourse: MarketRateItem = MarketRateItem(
         key = "bourse",
@@ -126,12 +131,10 @@ data class MarketRatesState(
         unitLabel = "واحد",
         displayPriceFormatted = null,
         displayDiffFormatted = null,
-        sourceLabel = "TGJU"
+        sourceLabel = "TGJU (tgju.org/coin)"
     ),
     val lastUpdateTime: String = "",
     val isLoading: Boolean = false,
     val isSuccess: Boolean = true,
-    val errorMessage: String? = null,
-    val baleNeedsLogin: Boolean = false,
-    val baleStatusMessage: String? = null
+    val errorMessage: String? = null
 )

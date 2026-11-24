@@ -1,10 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,9 +21,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -38,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,31 +43,33 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.MarketRateItem
 import com.example.data.model.MarketRatesState
 import com.example.ui.theme.LocalAppFontScale
+import com.example.ui.theme.OutfitFontFamily
 import com.example.ui.theme.appTextColor
 import com.example.ui.theme.enDigits
 import com.example.ui.theme.scaledDp
 import com.example.utils.PersianDateHelper
+import java.util.Locale
 
 @Composable
 fun MarketRatesCard(
     ratesState: MarketRatesState,
     onRefresh: () -> Unit,
-    onConnectBale: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var activeChart by remember { mutableStateOf<MarketChartTarget?>(null) }
+    var activeTgjuHistoryAsset by remember { mutableStateOf<Pair<com.example.data.network.TgjuChartAsset, Double?>?>(null) }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -92,47 +92,76 @@ fun MarketRatesCard(
                     Surface(
                         shape = CircleShape,
                         color = Color(0xFFFEF3C7),
-                        modifier = Modifier.size(scaledDp(34f))
+                        modifier = Modifier.size(scaledDp(36f))
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Default.CurrencyExchange,
                                 contentDescription = null,
                                 tint = Color(0xFFD97706),
-                                modifier = Modifier.size(scaledDp(18f))
+                                modifier = Modifier.size(scaledDp(19f))
                             )
                         }
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Column {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            text = enDigits("قیمت روز ارز، طلا و رمزارز"),
+                            text = enDigits("قیمت روز ارز، طلا و سکه"),
                             fontSize = 15.sp,
+                            lineHeight = 20.sp,
                             fontWeight = FontWeight.Black,
                             color = appTextColor(MaterialTheme.colorScheme.onSurface)
                         )
-                        val displayUpdateTime = if (ratesState.lastUpdateTime.isNotBlank()) {
-                            com.example.data.network.MarketRatesService.formatToShamsiDateTime(ratesState.lastUpdateTime)
+                        val displayUpdateTime = ratesState.lastUpdateTime.trim()
+                        if (displayUpdateTime.isNotBlank()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Text(
+                                    text = "به‌روزرسانی:",
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = appTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                    Text(
+                                        text = PersianDateHelper.toEnglishDigits(displayUpdateTime),
+                                        fontFamily = OutfitFontFamily,
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = appTextColor(MaterialTheme.colorScheme.onSurface),
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
                         } else {
-                            ""
+                            Text(
+                                text = "نرخ لحظه‌ای بازار",
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = appTextColor(MaterialTheme.colorScheme.onSurfaceVariant)
+                            )
                         }
-                        Text(
-                            text = enDigits(if (displayUpdateTime.isNotBlank()) "به‌روزرسانی: $displayUpdateTime" else "نرخ لحظه‌ای بازار"),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = appTextColor(MaterialTheme.colorScheme.onSurface)
-                        )
                     }
                 }
 
                 IconButton(
                     onClick = onRefresh,
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("refresh_market_rates_button")
                 ) {
                     if (ratesState.isLoading) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.2.dp,
                             color = MaterialTheme.colorScheme.primary
                         )
                     } else {
@@ -140,70 +169,57 @@ fun MarketRatesCard(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "به‌روزرسانی قیمت‌ها",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
             }
 
-            val anyBaleMissing = ratesState.baleNeedsLogin ||
-                ratesState.dollar.priceTomans <= 0L ||
-                ratesState.gold18k.priceTomans <= 0L ||
-                ratesState.tether.priceTomans <= 0L
-
-            if (anyBaleMissing) {
+            if (!ratesState.errorMessage.isNullOrBlank() && ratesState.dollar.priceTomans <= 0L) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFFECFDF5),
-                    border = BorderStroke(1.2.dp, Color(0xFF10B981)),
+                    color = Color(0xFFFEF2F2),
+                    border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .clickable { onConnectBale() }
+                        .clickable { onRefresh() }
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "اتصال به کانال‌های بله (دریافت دلار، طلا، سکه و رمزارز)",
+                            text = "خطا در اتصال؛ برای دریافت مجدد لمس کنید",
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF065F46),
-                            softWrap = true,
+                            color = Color(0xFF991B1B),
                             modifier = Modifier.weight(1f)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF059669)
-                        ) {
-                            Text(
-                                text = "ورود و دریافت",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                            )
-                        }
+                        Text(
+                            text = "تلاش مجدد",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFFDC2626)
+                        )
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Row 1: Dollar (Fresh Emerald Mint) and Euro (Royal Azure Blue)
+            // Row 1: Dollar and Euro
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(IntrinsicSize.Max),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Dollar ($) - زمردی خنک و پرانرژی (چارت زنده از iranbroker.net)
                 MarketRateColumnItem(
                     item = ratesState.dollar,
                     symbol = "$",
@@ -213,15 +229,12 @@ fun MarketRatesCard(
                     titleColor = Color(0xFF065F46),
                     chartTestTag = "market_rate_dollar_chart",
                     onChartClick = {
-                        activeChart = MarketChartTarget(
-                            title = "نمودار لحظه‌ای دلار",
-                            url = "https://iranbroker.net/symbol/usd"
-                        )
+                        val live = ratesState.dollar.priceTomans.takeIf { it > 0L }?.toDouble()
+                        activeTgjuHistoryAsset = com.example.data.network.TgjuChartAsset.DOLLAR to live
                     },
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
 
-                // Euro (€) - آبی لاجوردی و سلطنتی (چارت زنده از iranbroker.net)
                 MarketRateColumnItem(
                     item = ratesState.euro,
                     symbol = "€",
@@ -231,25 +244,22 @@ fun MarketRatesCard(
                     titleColor = Color(0xFF1E40AF),
                     chartTestTag = "market_rate_euro_chart",
                     onChartClick = {
-                        activeChart = MarketChartTarget(
-                            title = "نمودار لحظه‌ای یورو",
-                            url = "https://iranbroker.net/symbol/eur"
-                        )
+                        val live = ratesState.euro.priceTomans.takeIf { it > 0L }?.toDouble()
+                        activeTgjuHistoryAsset = com.example.data.network.TgjuChartAsset.EURO to live
                     },
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
             }
 
-            Spacer(modifier = Modifier.height(5.5.dp))
+            Spacer(modifier = Modifier.height(7.dp))
 
-            // Row 2: Sekeh Emami (Sunset Amber Gold) and Rob Sekeh (Luminous Coral Rose)
+            // Row 2: Sekeh Emami and Rob Sekeh
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(IntrinsicSize.Max),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Sekeh Emami - کهربایی و عسلی شاهانه (نماد حذف شد تا عنوان کامل دیده شود)
                 MarketRateColumnItem(
                     item = ratesState.sekehEmami,
                     symbol = "",
@@ -257,10 +267,14 @@ fun MarketRatesCard(
                     gradientColors = listOf(Color(0xFFFFFBEB), Color(0xFFFDE68A)),
                     borderColor = Color(0xFFFBBF24),
                     titleColor = Color(0xFF854D0E),
+                    chartTestTag = "market_rate_sekeh_emami_chart",
+                    onChartClick = {
+                        val live = ratesState.sekehEmami.priceTomans.takeIf { it > 0L }?.toDouble()
+                        activeTgjuHistoryAsset = com.example.data.network.TgjuChartAsset.SEKEH_EMAMI to live
+                    },
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
 
-                // Rob Sekeh - رزگلد و مرجانی فاخر (نماد حذف شد تا عنوان کامل دیده شود)
                 MarketRateColumnItem(
                     item = ratesState.robSekeh,
                     symbol = "",
@@ -268,20 +282,24 @@ fun MarketRatesCard(
                     gradientColors = listOf(Color(0xFFFFF1F2), Color(0xFFFFE4E6)),
                     borderColor = Color(0xFFFDA4AF),
                     titleColor = Color(0xFF9F1239),
+                    chartTestTag = "market_rate_rob_sekeh_chart",
+                    onChartClick = {
+                        val live = ratesState.robSekeh.priceTomans.takeIf { it > 0L }?.toDouble()
+                        activeTgjuHistoryAsset = com.example.data.network.TgjuChartAsset.ROB_SEKEH to live
+                    },
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
             }
 
-            Spacer(modifier = Modifier.height(5.5.dp))
+            Spacer(modifier = Modifier.height(7.dp))
 
-            // Row 3: Gold Ounce (Amethyst Royal Violet) and 18k/16k Gold (Radiant Sunlight Gold)
+            // Row 3: Gold Ounce and 18k Gold
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(IntrinsicSize.Max),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Global Gold Ounce - بنفش آمتیست لوکس
                 MarketRateColumnItem(
                     item = ratesState.goldOunce,
                     symbol = "",
@@ -289,10 +307,17 @@ fun MarketRatesCard(
                     gradientColors = listOf(Color(0xFFF5F3FF), Color(0xFFEDE9FE)),
                     borderColor = Color(0xFFC4B5FD),
                     titleColor = Color(0xFF5B21B6),
+                    chartTestTag = "market_rate_gold_ounce_chart",
+                    onChartClick = {
+                        val liveStr = ratesState.goldOunce.displayPriceFormatted
+                            ?.replace("$", "")?.replace(",", "")?.trim()
+                        val live = liveStr?.toDoubleOrNull()
+                            ?: ratesState.goldOunce.priceTomans.takeIf { it > 0L }?.toDouble()
+                        activeTgjuHistoryAsset = com.example.data.network.TgjuChartAsset.GOLD_OUNCE to live
+                    },
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
 
-                // 18k/16k Gold - طلایی درخشان (چارت زنده از moj3.ir)
                 MarketRateColumnItem(
                     item = ratesState.gold18k,
                     symbol = "",
@@ -302,27 +327,22 @@ fun MarketRatesCard(
                     titleColor = Color(0xFF854D0E),
                     chartTestTag = "market_rate_gold_18k_chart",
                     onChartClick = {
-                        activeChart = MarketChartTarget(
-                            title = PersianDateHelper.normalizeToEnglishNumbers(
-                                "نمودار ${ratesState.gold18k.title.ifBlank { "طلای 18 عیار" }}"
-                            ),
-                            url = "https://moj3.ir/price/chart"
-                        )
+                        val live = ratesState.gold18k.priceTomans.takeIf { it > 0L }?.toDouble()
+                        activeTgjuHistoryAsset = com.example.data.network.TgjuChartAsset.GOLD_18K to live
                     },
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
             }
 
-            Spacer(modifier = Modifier.height(5.5.dp))
+            Spacer(modifier = Modifier.height(7.dp))
 
-            // Row 4: Bitcoin (Electric Crypto Orange) and Tether USDT (Vibrant Crypto Mint Teal)
+            // Row 4: Bitcoin and Tether USDT
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(IntrinsicSize.Max),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Bitcoin - نارنجی کریپتو شاد
                 MarketRateColumnItem(
                     item = ratesState.bitcoin,
                     symbol = "",
@@ -330,10 +350,17 @@ fun MarketRatesCard(
                     gradientColors = listOf(Color(0xFFFFF7ED), Color(0xFFFFEDD5)),
                     borderColor = Color(0xFFFDBA74),
                     titleColor = Color(0xFF9A3412),
+                    chartTestTag = "market_rate_bitcoin_chart",
+                    onChartClick = {
+                        val liveStr = ratesState.bitcoin.displayPriceFormatted
+                            ?.replace("$", "")?.replace(",", "")?.replace("دلار", "")?.trim()
+                        val live = liveStr?.let { PersianDateHelper.toEnglishDigits(it).toDoubleOrNull() }
+                            ?: ratesState.bitcoin.priceTomans.takeIf { it > 0L }?.toDouble()
+                        activeTgjuHistoryAsset = com.example.data.network.TgjuChartAsset.BITCOIN to live
+                    },
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
 
-                // Tether USDT - فیروزه‌ای و سبز زمردی کریپتو تتر
                 MarketRateColumnItem(
                     item = ratesState.tether,
                     symbol = "₮",
@@ -341,20 +368,23 @@ fun MarketRatesCard(
                     gradientColors = listOf(Color(0xFFE6FFFA), Color(0xFFCCFBF1)),
                     borderColor = Color(0xFF2DD4BF),
                     titleColor = Color(0xFF0F766E),
+                    chartTestTag = null,
+                    onChartClick = null,
+                    isLoading = ratesState.isLoading,
+                    onRetryClick = onRefresh,
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
             }
 
-            Spacer(modifier = Modifier.height(5.5.dp))
+            Spacer(modifier = Modifier.height(7.dp))
 
-            // Row 5: Tehran Stock Exchange (Royal Sapphire Blue) and Crude Oil (Deep Petrol Teal)
+            // Row 5: Tehran Stock Exchange and Brent Crude Oil
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(IntrinsicSize.Max),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // شاخص کل بورس تهران
                 MarketRateColumnItem(
                     item = ratesState.bourse,
                     symbol = "",
@@ -362,10 +392,17 @@ fun MarketRatesCard(
                     gradientColors = listOf(Color(0xFFEFF6FF), Color(0xFFDBEAFE)),
                     borderColor = Color(0xFF93C5FD),
                     titleColor = Color(0xFF1E40AF),
+                    chartTestTag = "market_rate_bourse_chart",
+                    onChartClick = {
+                        val liveStr = ratesState.bourse.displayPriceFormatted
+                            ?.replace(",", "")?.replace("واحد", "")?.trim()
+                        val live = liveStr?.let { PersianDateHelper.toEnglishDigits(it).toDoubleOrNull() }
+                            ?: ratesState.bourse.priceTomans.takeIf { it > 0L }?.toDouble()
+                        activeTgjuHistoryAsset = com.example.data.network.TgjuChartAsset.BOURSE to live
+                    },
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
 
-                // Crude Oil - نفت برنت دریای شمال
                 MarketRateColumnItem(
                     item = ratesState.crudeOil,
                     symbol = "",
@@ -373,16 +410,25 @@ fun MarketRatesCard(
                     gradientColors = listOf(Color(0xFFF0FDFA), Color(0xFFCCFBF1)),
                     borderColor = Color(0xFF5EEAD4),
                     titleColor = Color(0xFF115E59),
+                    chartTestTag = "market_rate_brent_oil_chart",
+                    onChartClick = {
+                        val liveStr = ratesState.crudeOil.displayPriceFormatted
+                            ?.replace("$", "")?.replace(",", "")?.replace("دلار", "")?.trim()
+                        val live = liveStr?.let { PersianDateHelper.toEnglishDigits(it).toDoubleOrNull() }
+                            ?: ratesState.crudeOil.priceTomans.takeIf { it > 0L }?.toDouble()
+                        activeTgjuHistoryAsset = com.example.data.network.TgjuChartAsset.BRENT_OIL to live
+                    },
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
             }
         }
     }
 
-    activeChart?.let { target ->
-        MarketChartDialog(
-            target = target,
-            onDismiss = { activeChart = null }
+    activeTgjuHistoryAsset?.let { (asset, livePrice) ->
+        TgjuHistoricalChartDialog(
+            asset = asset,
+            liveLatestPrice = livePrice,
+            onDismiss = { activeTgjuHistoryAsset = null }
         )
     }
 }
@@ -397,180 +443,442 @@ private fun MarketRateColumnItem(
     titleColor: Color,
     modifier: Modifier = Modifier,
     chartTestTag: String? = null,
-    onChartClick: (() -> Unit)? = null
+    onChartClick: (() -> Unit)? = null,
+    isLoading: Boolean = false,
+    onRetryClick: (() -> Unit)? = null
 ) {
     val uiScale = LocalAppFontScale.current
     val isGreen = item.isPositiveChange
     val changeColor = if (isGreen) Color(0xFF065F46) else Color(0xFF991B1B)
     val changeBg = if (isGreen) Color(0xFFD1FAE5) else Color(0xFFFEE2E2)
     val changeBorder = if (isGreen) Color(0xFF10B981) else Color(0xFFEF4444)
+    val isPendingSource = item.priceTomans <= 0L && item.displayPriceFormatted.isNullOrBlank()
 
     Box(
         modifier = modifier
-            .defaultMinSize(minHeight = scaledDp(68f))
-            .clip(RoundedCornerShape(13.dp))
+            .defaultMinSize(minHeight = scaledDp(96f))
+            .clip(RoundedCornerShape(14.dp))
             .background(Brush.linearGradient(gradientColors))
-            .border(BorderStroke(1.3.dp, borderColor), RoundedCornerShape(13.dp))
+            .border(BorderStroke(1.3.dp, borderColor), RoundedCornerShape(14.dp))
             .then(
-                if (onChartClick != null) {
-                    Modifier
+                when {
+                    onChartClick != null -> Modifier
                         .then(if (chartTestTag != null) Modifier.testTag(chartTestTag) else Modifier)
                         .clickable { onChartClick() }
-                } else {
-                    Modifier
+                    isPendingSource && !isLoading && onRetryClick != null -> Modifier
+                        .clickable { onRetryClick() }
+                    else -> Modifier
                 }
             )
-            .padding(horizontal = scaledDp(9f), vertical = (7f * uiScale).coerceIn(5f, 12f).dp)
+            .padding(horizontal = scaledDp(8f), vertical = (8f * uiScale).coerceIn(6f, 12f).dp)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Line 1: Title + optional Chart indicator pill
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Row 1: Title + optional Chart pill (kept cleanly separated)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    if (symbol.isNotBlank()) {
-                        Text(
-                            text = symbol,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Black,
-                            color = badgeColor
-                        )
-                        Spacer(modifier = Modifier.width(3.5.dp))
-                    }
-                    Text(
-                        text = enDigits(item.title),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Black,
-                        color = titleColor,
-                        softWrap = true
-                    )
-                }
-
-                if (onChartClick != null) {
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = badgeColor.copy(alpha = 0.16f),
-                        border = BorderStroke(0.9.dp, badgeColor.copy(alpha = 0.55f))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        if (symbol.isNotBlank()) {
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(
+                                    text = symbol,
+                                    fontFamily = OutfitFontFamily,
+                                    fontSize = 13.sp,
+                                    lineHeight = 16.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = badgeColor,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(3.dp))
+                        }
+                        Text(
+                            text = enDigits(item.title),
+                            fontSize = 12.5.sp,
+                            lineHeight = 17.sp,
+                            fontWeight = FontWeight.Black,
+                            color = titleColor,
+                            maxLines = 2,
+                            softWrap = true
+                        )
+                    }
+
+                    if (onChartClick != null) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = badgeColor.copy(alpha = 0.16f),
+                            border = BorderStroke(0.9.dp, badgeColor.copy(alpha = 0.55f))
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.ShowChart,
-                                contentDescription = "مشاهده چارت ${item.title}",
-                                tint = badgeColor,
-                                modifier = Modifier.size(11.dp)
-                            )
-                            Spacer(modifier = Modifier.width(2.dp))
-                            Text(
-                                text = "نمودار",
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Black,
-                                color = badgeColor,
-                                maxLines = 1
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ShowChart,
+                                    contentDescription = "مشاهده چارت ${item.title}",
+                                    tint = badgeColor,
+                                    modifier = Modifier.size(10.dp)
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text(
+                                    text = "نمودار",
+                                    fontSize = 9.sp,
+                                    lineHeight = 12.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = badgeColor,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-            val isPendingSource = item.priceTomans <= 0L && item.displayPriceFormatted.isNullOrBlank()
-            val isBaleSource = item.sourceLabel.contains("بله")
-
-            // Line 2: Price (Full width, large, bold, high-contrast black)
-            val priceText = when {
-                isPendingSource -> if (isBaleSource) "نیاز به اتصال بله" else "در حال دریافت..."
-                item.displayPriceFormatted != null -> item.displayPriceFormatted.replace(" واحد", "\u00A0واحد")
-                item.unitLabel == "دلار" -> "$" + PersianDateHelper.formatCurrency(item.priceTomans, includeUnit = false)
-                else -> PersianDateHelper.formatCurrency(item.priceTomans, includeUnit = false) + "\u00A0تومان"
-            }
-
-            Text(
-                text = enDigits(priceText),
-                fontSize = if (isPendingSource) 11.5.sp else 14.sp,
-                fontWeight = FontWeight.Black,
-                color = if (isPendingSource) Color(0xFF334155) else Color.Black,
-                softWrap = true
-            )
-
-            // Line 3: Only show pending status OR live delta pill (removed "منبع: بله" / "منبع: TGJU" to reduce card height)
-            if (isPendingSource) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Surface(
-                    shape = RoundedCornerShape(7.dp),
-                    color = Color(0xFFF1F5F9),
-                    border = BorderStroke(1.dp, Color(0xFFCBD5E1))
-                ) {
+                // Row 2: Live Price — strictly separated LTR numeric value & Persian unit
+                if (isPendingSource) {
                     Text(
-                        text = enDigits(item.sourceLabel.ifBlank { "در انتظار" }),
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF1E293B),
+                        text = if (isLoading) "در حال دریافت..." else "نامشخص · تلاش مجدد",
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isLoading) Color(0xFF475569) else Color(0xFFB91C1C),
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = scaledDp(7f), vertical = scaledDp(2f))
+                        overflow = TextOverflow.Ellipsis
                     )
-                }
-            } else {
-                val sign = if (isGreen) "+" else "-"
-                val hasDelta = item.changeTomans > 0L || item.changePercent > 0.0 || !item.displayDiffFormatted.isNullOrBlank()
-                if (hasDelta) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    val changeDisplayText = when {
-                        item.changeTomans == 0L && item.displayDiffFormatted.isNullOrBlank() && item.changePercent > 0.0 -> {
-                            val pctStr = String.format(java.util.Locale.US, "%.2f", item.changePercent)
-                            "$pctStr%$sign"
-                        }
+                } else {
+                    val priceNumberStr = when {
                         item.unitLabel == "دلار" -> {
-                            val rawDiffStr = item.displayDiffFormatted?.replace("$", "")?.replace("+", "")?.replace("-", "")?.trim()
-                            val diffNumStr = if (!rawDiffStr.isNullOrBlank()) {
-                                rawDiffStr
+                            val raw = item.displayPriceFormatted
+                                ?.replace("دلار", "")
+                                ?.replace("\u00A0", "")
+                                ?.trim()
+                            if (!raw.isNullOrBlank()) {
+                                val normalized = PersianDateHelper.toEnglishDigits(raw)
+                                if (normalized.startsWith("$")) normalized else "$$normalized"
                             } else {
-                                PersianDateHelper.formatCurrency(item.changeTomans, includeUnit = false)
+                                "$" + PersianDateHelper.formatCurrency(item.priceTomans, includeUnit = false)
                             }
-                            "$$diffNumStr$sign"
                         }
                         item.unitLabel == "واحد" -> {
-                            val rawNum = item.displayDiffFormatted?.replace("+", "")?.replace("-", "")?.trim()
-                                ?: PersianDateHelper.formatCurrency(item.changeTomans, includeUnit = false)
-                            "$rawNum$sign"
+                            val raw = item.displayPriceFormatted
+                                ?.replace("واحد", "")
+                                ?.replace("\u00A0", "")
+                                ?.trim()
+                            if (!raw.isNullOrBlank()) {
+                                PersianDateHelper.toEnglishDigits(raw)
+                            } else {
+                                PersianDateHelper.formatCurrency(item.priceTomans, includeUnit = false)
+                            }
                         }
-                        else -> {
-                            val numStr = PersianDateHelper.formatCurrency(item.changeTomans, includeUnit = false)
-                            "$numStr$sign\u00A0تومان"
-                        }
+                        else -> PersianDateHelper.formatCurrency(item.priceTomans, includeUnit = false)
                     }
 
+                    val priceUnitStr = when (item.unitLabel) {
+                        "دلار" -> ""
+                        "واحد" -> "واحد"
+                        else -> "تومان"
+                    }
+
+                    val numFontSize = when {
+                        priceNumberStr.length >= 11 -> 12.sp
+                        priceNumberStr.length >= 9 -> 13.sp
+                        else -> 14.sp
+                    }
+
+                    val stackPriceUnit = priceUnitStr.isNotEmpty() &&
+                        ((uiScale >= 1.16f && priceNumberStr.length >= 8) || priceNumberStr.length >= 11)
+
+                    if (stackPriceUnit) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(1.dp)
+                        ) {
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(
+                                    text = priceNumberStr,
+                                    fontFamily = OutfitFontFamily,
+                                    fontSize = numFontSize,
+                                    lineHeight = (numFontSize.value + 3f).sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.Black,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Text(
+                                text = priceUnitStr,
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF334155),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(
+                                    text = priceNumberStr,
+                                    fontFamily = OutfitFontFamily,
+                                    fontSize = numFontSize,
+                                    lineHeight = (numFontSize.value + 3f).sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.Black,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (priceUnitStr.isNotEmpty()) {
+                                Text(
+                                    text = priceUnitStr,
+                                    fontSize = 10.5.sp,
+                                    lineHeight = 14.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF334155),
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Row 3: Bottom Increase / Decrease Amount Pill — strictly separated words & LTR numbers
+            val isLoaded = item.priceTomans > 0L || !item.displayPriceFormatted.isNullOrBlank()
+            if (isLoaded) {
+                Spacer(modifier = Modifier.height(6.dp))
+
+                val cleanDiffNumber = when (item.unitLabel) {
+                    "دلار" -> {
+                        val raw = item.displayDiffFormatted
+                            ?.replace("+", "")
+                            ?.replace("-", "")
+                            ?.replace("دلار", "")
+                            ?.replace("\u00A0", "")
+                            ?.trim()
+                        if (!raw.isNullOrBlank()) {
+                            val norm = PersianDateHelper.toEnglishDigits(raw)
+                            if (norm.startsWith("$")) norm else "$$norm"
+                        } else if (item.changeTomans > 0L) {
+                            "$" + PersianDateHelper.formatCurrency(item.changeTomans, includeUnit = false)
+                        } else {
+                            ""
+                        }
+                    }
+                    "واحد" -> {
+                        val raw = item.displayDiffFormatted
+                            ?.replace("+", "")
+                            ?.replace("-", "")
+                            ?.replace("واحد", "")
+                            ?.replace("\u00A0", "")
+                            ?.trim()
+                        if (!raw.isNullOrBlank()) {
+                            PersianDateHelper.toEnglishDigits(raw)
+                        } else if (item.changeTomans > 0L) {
+                            PersianDateHelper.formatCurrency(item.changeTomans, includeUnit = false)
+                        } else {
+                            ""
+                        }
+                    }
+                    else -> {
+                        if (item.changeTomans > 0L) {
+                            PersianDateHelper.formatCurrency(item.changeTomans, includeUnit = false)
+                        } else {
+                            ""
+                        }
+                    }
+                }
+
+                val diffUnitStr = when (item.unitLabel) {
+                    "دلار" -> ""
+                    "واحد" -> "واحد"
+                    else -> "تومان"
+                }
+
+                val hasAmountDiff = cleanDiffNumber.isNotEmpty()
+                val hasPercent = item.changePercent >= 0.005
+                val hasAnyDelta = hasAmountDiff || hasPercent
+                val sign = if (isGreen) "+" else "-"
+                val percentText = if (hasPercent) {
+                    "$sign${String.format(Locale.US, "%.2f", item.changePercent)}%"
+                } else {
+                    ""
+                }
+
+                if (!hasAnyDelta) {
                     Surface(
-                        shape = RoundedCornerShape(7.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFF1F5F9),
+                        border = BorderStroke(1.dp, Color(0xFFCBD5E1))
+                    ) {
+                        Text(
+                            text = "بدون تغییر",
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF475569),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = scaledDp(6f), vertical = scaledDp(3f))
+                        )
+                    }
+                } else {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
                         color = changeBg,
                         border = BorderStroke(1.dp, changeBorder)
                     ) {
-                        Text(
-                            text = enDigits(changeDisplayText),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Black,
-                            color = changeColor,
-                            maxLines = 2,
-                            softWrap = true,
-                            modifier = Modifier.padding(horizontal = scaledDp(7f), vertical = scaledDp(2f))
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = scaledDp(6f), vertical = scaledDp(4f)),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            // Top line of change badge: Direction word ("افزایش"/"کاهش") + optional percentage
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isGreen) {
+                                            Icons.AutoMirrored.Filled.TrendingUp
+                                        } else {
+                                            Icons.AutoMirrored.Filled.TrendingDown
+                                        },
+                                        contentDescription = if (isGreen) "افزایش قیمت" else "کاهش قیمت",
+                                        tint = changeColor,
+                                        modifier = Modifier.size(scaledDp(12f))
+                                    )
+                                    Text(
+                                        text = if (isGreen) "افزایش" else "کاهش",
+                                        fontSize = 10.sp,
+                                        lineHeight = 13.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = changeColor,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+
+                                if (percentText.isNotEmpty()) {
+                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                        Text(
+                                            text = percentText,
+                                            fontFamily = OutfitFontFamily,
+                                            fontSize = 9.5.sp,
+                                            lineHeight = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = changeColor,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Bottom line of change badge: Exact numeric delta + separate unit label
+                            if (hasAmountDiff) {
+                                val signedDiff = "$sign$cleanDiffNumber"
+                                val diffFontSize = if (signedDiff.length >= 10) 10.sp else 11.sp
+                                val stackDiffUnit = diffUnitStr.isNotEmpty() &&
+                                    ((uiScale >= 1.16f && signedDiff.length >= 8) || signedDiff.length >= 11)
+
+                                if (stackDiffUnit) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                                    ) {
+                                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                            Text(
+                                                text = signedDiff,
+                                                fontFamily = OutfitFontFamily,
+                                                fontSize = diffFontSize,
+                                                lineHeight = (diffFontSize.value + 3f).sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = changeColor,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Text(
+                                            text = diffUnitStr,
+                                            fontSize = 9.5.sp,
+                                            lineHeight = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = changeColor,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                } else {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                            Text(
+                                                text = signedDiff,
+                                                fontFamily = OutfitFontFamily,
+                                                fontSize = diffFontSize,
+                                                lineHeight = (diffFontSize.value + 3f).sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = changeColor,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        if (diffUnitStr.isNotEmpty()) {
+                                            Text(
+                                                text = diffUnitStr,
+                                                fontSize = 9.5.sp,
+                                                lineHeight = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = changeColor,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
 }
-

@@ -1,6 +1,7 @@
 package com.example.data.model
 
 enum class NewsSource(val displayName: String, val websiteUrl: String, val colorHex: Long) {
+    ROKNA("رکنا", "https://www.rokna.net", 0xFFB91C1C),
     TABNAK("تابناک", "https://www.tabnak.ir", 0xFFDC2626),
     ZOOMIT("زومیت", "https://www.zoomit.ir", 0xFF2563EB),
     FARARU("فرارو", "https://fararu.com", 0xFFEA580C),
@@ -12,6 +13,7 @@ enum class NewsSource(val displayName: String, val websiteUrl: String, val color
 
 enum class NewsCategory(val displayName: String) {
     ALL("همه اخبار"),
+    ACCIDENTS("حوادث"),
     ECONOMY("اقتصادی"),
     POLITICS("سیاسی"),
     TECHNOLOGY("تکنولوژی"),

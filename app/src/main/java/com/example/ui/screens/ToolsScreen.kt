@@ -89,8 +89,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.LocalTextStyle
-import com.example.ui.components.BaleBackgroundSyncRunner
-import com.example.ui.components.BaleInteractiveSyncDialog
 import com.example.ui.components.InstallmentReminderCard
 import com.example.ui.components.MarketRatesCard
 import com.example.ui.components.ReceiptAttachmentToolCard
@@ -185,15 +183,9 @@ fun ToolsScreen(
     val marketRatesState by viewModel.marketRates.collectAsStateWithLifecycle()
     var selectedTool by rememberSaveable { mutableStateOf<ToolSection?>(null) }
     var isDropdownExpanded by rememberSaveable { mutableStateOf(true) }
-    var runSilentBaleSync by remember { mutableStateOf(false) }
-    var openBaleDialogIfLoginNeeded by remember { mutableStateOf(false) }
-    var showBaleInteractiveDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        if (!runSilentBaleSync) {
-            openBaleDialogIfLoginNeeded = false
-            runSilentBaleSync = true
-        }
+        viewModel.refreshMarketRates()
     }
 
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -423,58 +415,25 @@ fun ToolsScreen(
             }
         }
 
-        // 3. قیمت روز ارز، طلا، رمزارز (از بله) و بورس/نفت (از tgju.org/coin)
+        // 3. قیمت روز ارز، طلا، سکه، رمزارز، بورس و نفت (از tgju.org/coin)
         item {
             MarketRatesCard(
                 ratesState = marketRatesState,
                 onRefresh = {
-                    Toast.makeText(context, "در حال به‌روزرسانی بورس/نفت و نرخ‌های بله...", Toast.LENGTH_SHORT).show()
-                    viewModel.refreshMarketRates()
-                    openBaleDialogIfLoginNeeded = true
-                    runSilentBaleSync = true
-                },
-                onConnectBale = {
-                    showBaleInteractiveDialog = true
+                    Toast.makeText(context, "در حال دریافت نرخ لحظه‌ای از tgju.org...", Toast.LENGTH_SHORT).show()
+                    viewModel.refreshMarketRates { ok ->
+                        val msg = if (ok) {
+                            "قیمت‌های بازار از tgju.org به‌روزرسانی شد"
+                        } else {
+                            "خطا در دریافت نرخ جدید؛ اتصال اینترنت را بررسی کنید"
+                        }
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
                 }
             )
         }
 
         item { Spacer(modifier = Modifier.height(110.dp)) }
-    }
-
-    BaleBackgroundSyncRunner(
-        active = runSilentBaleSync,
-        onCompleted = { extracted ->
-            runSilentBaleSync = false
-            openBaleDialogIfLoginNeeded = false
-            viewModel.applyBaleExtractedRates(extracted)
-            Toast.makeText(context, "قیمت‌ها از کانال‌های بله به‌روزرسانی شد", Toast.LENGTH_SHORT).show()
-        },
-        onNeedsLogin = {
-            runSilentBaleSync = false
-            viewModel.markBaleLoginRequired(true)
-            if (openBaleDialogIfLoginNeeded) {
-                openBaleDialogIfLoginNeeded = false
-                showBaleInteractiveDialog = true
-            }
-        },
-        onFailed = {
-            runSilentBaleSync = false
-            openBaleDialogIfLoginNeeded = false
-            viewModel.markBaleLoginRequired(false)
-            Toast.makeText(context, "خطا در خواندن پیام کانال‌های بله", Toast.LENGTH_SHORT).show()
-        }
-    )
-
-    if (showBaleInteractiveDialog) {
-        BaleInteractiveSyncDialog(
-            onDismiss = { showBaleInteractiveDialog = false },
-            onRatesExtracted = { extracted ->
-                showBaleInteractiveDialog = false
-                viewModel.applyBaleExtractedRates(extracted)
-                Toast.makeText(context, "قیمت‌های ارز، طلا و رمزارز از بله ثبت شد", Toast.LENGTH_SHORT).show()
-            }
-        )
     }
 }
 
