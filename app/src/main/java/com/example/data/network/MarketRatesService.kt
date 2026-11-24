@@ -90,10 +90,10 @@ class MarketRatesService(private val context: Context) {
     private fun fetchTgjuRatesIsolated(now: Long, nonce: String): TgjuExtractedRates {
         var merged = TgjuExtractedRates()
 
-        // اولویت اول: ویجت لحظه‌ای رسمی api.tgju.org (کمترین کش و به‌روزترین قیمت) — بدون تتر
+        // اولویت اول: ویجت لحظه‌ای رسمی api.tgju.org (تک‌فروشی سکه امامی و ربع سکه) — بدون تتر
         val allWidgetKeys = listOf(
-            "price_dollar_rl", "price_eur", "sekee", "retail_sekee",
-            "rob", "retail_rob", "ons", "geram18",
+            "price_dollar_rl", "price_eur", "retail_sekee",
+            "retail_rob", "ons", "geram18",
             "crypto-bitcoin", "bourse", "oil_brent"
         )
         runCatching {
@@ -167,7 +167,7 @@ class MarketRatesService(private val context: Context) {
 
     fun hasAnyCachedTgjuRate(): Boolean {
         return prefs.getLong("tgju_v5_dollar_price", 0L) > 0L ||
-            prefs.getLong("tgju_v5_sekee_price", 0L) > 0L ||
+            prefs.getLong("tgju_v6_retail_sekee_price", 0L) > 0L ||
             prefs.getLong("tgju_v5_gold18_price", 0L) > 0L ||
             prefs.getLong("tgju_v5_bourse_price", 0L) > 0L
     }
@@ -218,8 +218,8 @@ class MarketRatesService(private val context: Context) {
         prefs.edit().apply {
             saveItem(this, "tgju_v5_dollar", rates.dollar)
             saveItem(this, "tgju_v5_euro", rates.euro)
-            saveItem(this, "tgju_v5_sekee", rates.sekehEmami)
-            saveItem(this, "tgju_v5_rob", rates.robSekeh)
+            saveItem(this, "tgju_v6_retail_sekee", rates.sekehEmami)
+            saveItem(this, "tgju_v6_retail_rob", rates.robSekeh)
             saveItem(this, "tgju_v5_ons", rates.goldOunce)
             saveItem(this, "tgju_v5_gold18", rates.gold18k)
             saveItem(this, "tgju_v5_btc", rates.bitcoin)
@@ -237,8 +237,8 @@ class MarketRatesService(private val context: Context) {
         return MarketRatesState(
             dollar = loadItem("tgju_v5_dollar", "price_dollar_rl", "دلار", "تومان"),
             euro = loadItem("tgju_v5_euro", "price_eur", "یورو", "تومان"),
-            sekehEmami = loadItem("tgju_v5_sekee", "sekee", "سکه امامی", "تومان"),
-            robSekeh = loadItem("tgju_v5_rob", "rob", "ربع سکه", "تومان"),
+            sekehEmami = loadItem("tgju_v6_retail_sekee", "retail_sekee", "سکه امامی (تک‌فروشی)", "تومان"),
+            robSekeh = loadItem("tgju_v6_retail_rob", "retail_rob", "ربع سکه (تک‌فروشی)", "تومان"),
             goldOunce = loadItem("tgju_v5_ons", "ons", "انس جهانی طلا", "دلار"),
             gold18k = loadItem("tgju_v5_gold18", "geram18", "طلای 18 عیار", "تومان"),
             bitcoin = loadItem("tgju_v5_btc", "crypto-bitcoin", "بیت‌کوین", "دلار"),
@@ -324,12 +324,12 @@ class MarketRatesService(private val context: Context) {
             if (dollar == null) add("price_dollar_rl")
             if (euro == null) add("price_eur")
             if (sekehEmami == null) {
-                add("sekee")
                 add("retail_sekee")
+                add("sekee")
             }
             if (robSekeh == null) {
-                add("rob")
                 add("retail_rob")
+                add("rob")
             }
             if (goldOunce == null) add("ons")
             if (gold18k == null) add("geram18")
@@ -379,8 +379,8 @@ class MarketRatesService(private val context: Context) {
 
             val dollarObj = firstObj("price_dollar_rl")
             val euroObj = firstObj("price_eur")
-            val sekeeObj = firstObj("sekee", "retail_sekee")
-            val robObj = firstObj("rob", "retail_rob")
+            val sekeeObj = firstObj("retail_sekee", "sekee")
+            val robObj = firstObj("retail_rob", "rob")
             val onsObj = firstObj("ons")
             val gold18Obj = firstObj("geram18")
             val btcObj = firstObj("crypto-bitcoin", "crypto-bitcoin-usd", "bitcoin")
@@ -395,8 +395,8 @@ class MarketRatesService(private val context: Context) {
             val rates = TgjuExtractedRates(
                 dollar = dollarObj?.let { buildItemFromJson(it, "price_dollar_rl", "دلار", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0) },
                 euro = euroObj?.let { buildItemFromJson(it, "price_eur", "یورو", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0) },
-                sekehEmami = sekeeObj?.let { buildItemFromJson(it, "sekee", "سکه امامی", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 1_000_000.0) },
-                robSekeh = robObj?.let { buildItemFromJson(it, "rob", "ربع سکه", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 500_000.0) },
+                sekehEmami = sekeeObj?.let { buildItemFromJson(it, "retail_sekee", "سکه امامی (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 1_000_000.0) },
+                robSekeh = robObj?.let { buildItemFromJson(it, "retail_rob", "ربع سکه (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 500_000.0) },
                 goldOunce = onsObj?.let { buildItemFromJson(it, "ons", "انس جهانی طلا", TgjuValueMode.USD_DECIMAL, minPrice = 500.0) },
                 gold18k = gold18Obj?.let { buildItemFromJson(it, "geram18", "طلای 18 عیار", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 100_000.0) },
                 bitcoin = btcObj?.let { buildItemFromJson(it, "crypto-bitcoin", "بیت‌کوین", TgjuValueMode.USD_WHOLE, minPrice = 1_000.0) },
@@ -441,11 +441,11 @@ class MarketRatesService(private val context: Context) {
                     "price_eur" -> if (euro == null) {
                         euro = buildItemFromJson(obj, "price_eur", "یورو", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0)
                     }
-                    "sekee", "retail_sekee" -> if (sekee == null || name == "sekee") {
-                        buildItemFromJson(obj, "sekee", "سکه امامی", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 1_000_000.0)?.let { sekee = it }
+                    "retail_sekee", "sekee" -> if (sekee == null || name == "retail_sekee") {
+                        buildItemFromJson(obj, "retail_sekee", "سکه امامی (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 1_000_000.0)?.let { sekee = it }
                     }
-                    "rob", "retail_rob" -> if (rob == null || name == "rob") {
-                        buildItemFromJson(obj, "rob", "ربع سکه", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 500_000.0)?.let { rob = it }
+                    "retail_rob", "rob" -> if (rob == null || name == "retail_rob") {
+                        buildItemFromJson(obj, "retail_rob", "ربع سکه (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 500_000.0)?.let { rob = it }
                     }
                     "ons" -> if (ons == null) {
                         ons = buildItemFromJson(obj, "ons", "انس جهانی طلا", TgjuValueMode.USD_DECIMAL, minPrice = 500.0)
@@ -501,13 +501,33 @@ class MarketRatesService(private val context: Context) {
 
             val sekee = extractRowFromTgjuHtml(
                 html,
-                listOf("id=\"l-sekee\"", "data-market-row=\"sekee\"", "data-market-row=\"retail_sekee\"", "l-sekee", "سکه امامی")
-            )?.let { buildItemFromRaw(it, "sekee", "سکه امامی", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 1_000_000.0) }
+                listOf(
+                    "data-market-row=\"retail_sekee\"",
+                    "data-market-nameslug=\"retail_sekee\"",
+                    "id=\"l-retail_sekee\"",
+                    "profile/retail_sekee",
+                    "l-retail_sekee",
+                    "id=\"l-sekee\"",
+                    "data-market-row=\"sekee\"",
+                    "l-sekee",
+                    "سکه امامی"
+                )
+            )?.let { buildItemFromRaw(it, "retail_sekee", "سکه امامی (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 1_000_000.0) }
 
             val rob = extractRowFromTgjuHtml(
                 html,
-                listOf("id=\"l-rob\"", "data-market-row=\"rob\"", "data-market-row=\"retail_rob\"", "l-rob", "ربع سکه")
-            )?.let { buildItemFromRaw(it, "rob", "ربع سکه", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 500_000.0) }
+                listOf(
+                    "data-market-row=\"retail_rob\"",
+                    "data-market-nameslug=\"retail_rob\"",
+                    "id=\"l-retail_rob\"",
+                    "profile/retail_rob",
+                    "l-retail_rob",
+                    "id=\"l-rob\"",
+                    "data-market-row=\"rob\"",
+                    "l-rob",
+                    "ربع سکه"
+                )
+            )?.let { buildItemFromRaw(it, "retail_rob", "ربع سکه (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 500_000.0) }
 
             val ons = extractRowFromTgjuHtml(
                 html,
@@ -744,12 +764,16 @@ class MarketRatesService(private val context: Context) {
 
                     val dataPriceMatch = Regex("""data-price\s*=\s*["']([\d,\.]+)["']""").find(block)
                     val infoPriceMatches = Regex("""class\s*=\s*["'][^"']*\b(?:info-price|nf)\b[^"']*["'][^>]*>\s*([^<]+)<""").findAll(block).toList()
+                    val plainTdMatches = if (dataPriceMatch == null && infoPriceMatches.isEmpty()) {
+                        Regex("""<td[^>]*>\s*([0-9۰-۹,٬\.]+)\s*</td>""", RegexOption.IGNORE_CASE).findAll(block).toList()
+                    } else emptyList()
 
                     val candidateStrings = buildList {
                         dataPriceMatch?.groupValues?.get(1)?.let { add(it) }
                         infoPriceMatches.firstOrNull()?.groupValues?.get(1)?.let { add(it) }
                         if (isEmpty()) {
                             infoPriceMatches.forEach { add(it.groupValues[1]) }
+                            plainTdMatches.forEach { add(it.groupValues[1]) }
                         }
                     }
 

@@ -1,22 +1,41 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# مدیریت هزینه‌ها (مخارج) — اپلیکیشن اندروید
 
-# Run and deploy your AI Studio app
+اپلیکیشن اندرویدی مدیریت هزینه‌ها و امور مالی شخصی با **Kotlin**، **Jetpack Compose (Material 3)**، **Room Database** و پشتیبانی کامل از تقویم شمسی/میلادی.
 
-This contains everything you need to run your app locally.
+## پیش‌نیازهای بیلد محلی
+- **Android Studio** (نسخه سازگار با AGP 9.1.1)
+- **JDK 21** (Temurin / OpenJDK 21)
+- **Gradle Wrapper 9.3.1** (به صورت آماده در مخزن قرار دارد)
 
-View your app in AI Studio: https://ai.studio/apps/acbbe965-24cf-46b3-be79-8a43cae70d2c
+### دستورات ساخت محلی
+```bash
+chmod +x ./gradlew
+./gradlew :app:testDebugUnitTest
+./gradlew :app:assembleDebug
+```
 
-## Run Locally
+## ساخت خودکار APK در GitHub Actions
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+با هر بار `push` روی شاخه `main` یا `master` و یا اجرای دستی از تب **Actions** (`workflow_dispatch`)، ورک‌فلو `.github/workflows/android.yml` به صورت خودکار:
+1. محیط **JDK 21** و کش **Gradle** را تنظیم می‌کند.
+2. تست‌های واحد (`testDebugUnitTest`) را اجرا می‌کند.
+3. فایل **Debug APK** قابل نصب مستقیم روی گوشی (`Hazineh-Debug-APK`) را می‌سازد.
+4. فایل **Release APK** امضاشده (`Hazineh-Release-APK`) را می‌سازد (در صورت نبود کلید شخصی در Secrets، به صورت خودکار با کلید امضای موقت CI امضا می‌شود تا بیلد متوقف نشود).
+5. هر دو فایل APK را در بخش **Artifacts** همان اجرا برای دانلود آپلود می‌کند.
 
+## تنظیمات اختیاری GitHub Secrets (برای امضای رسمی Release)
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
-7. If you have already published your app in AI Studio, please [request upload key reset](https://support.google.com/googleplay/android-developer/answer/9842756#zippy=%2Crequest-an-upload-key-reset) in Google Play Console.
+برای ساخت بدون تنظیم دستی، هیچ Secret اجباری نیست. اما اگر می‌خواهید نسخه `Release APK` با کلید دائمی و شخصی خودتان امضا شود، در مسیر `Settings → Secrets and variables → Actions` مخزن، مقادیر زیر را تعریف کنید:
+
+| نام Secret | توضیح |
+|---|---|
+| `KEYSTORE_BASE64` | محتوای Base64 فایل کلید `my-upload-key.jks` (با `alias = upload`) |
+| `STORE_PASSWORD` | رمز فروشگاه کلید (Keystore Password) |
+| `KEY_PASSWORD` | رمز کلید `upload` (Key Password) |
+| `GOOGLE_SERVICES_JSON_BASE64` | (اختیاری) محتوای Base64 فایل `app/google-services.json` در صورت حذف آن از مخزن |
+
+ساخت کلید شخصی و تبدیل به Base64 (در صورت نیاز):
+```bash
+keytool -genkeypair -v -keystore my-upload-key.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000
+base64 -w 0 my-upload-key.jks
+```

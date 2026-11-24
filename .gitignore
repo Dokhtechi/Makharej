@@ -1,18 +1,59 @@
-*.iml
-.gradle
-.kotlin
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Java class files
+*.class
+
+# Generated & build directories
+bin/
+gen/
+out/
+release/
+build/
+app/build/
+*/build/
+
+# Gradle files
+.gradle/
+.kotlin/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local configuration file (SDK path, etc.)
 local.properties
+
+# Android Studio / IntelliJ IDEA
+*.iml
+.idea/
+captures/
+.navigation/
+.externalNativeBuild/
+.cxx/
+
+# AI Studio internal build & workspace artifacts
+.aistudio/
+.build-outputs/
+workspace/
+
+# Environment secrets (keep .env.example tracked)
 .env
+.env.local
+
+# Signing keystores (keep debug.keystore.base64 tracked for consistent CI debug builds)
+*.jks
+*.keystore
 debug.keystore
+!debug.keystore.base64
+
+# OS & temporary files
+.DS_Store
+Thumbs.db
+*.log
+*.hprof
+*.tmp

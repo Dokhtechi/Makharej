@@ -38,8 +38,8 @@ data class MarketRatesState(
         sourceLabel = "TGJU (tgju.org/coin)"
     ),
     val sekehEmami: MarketRateItem = MarketRateItem(
-        key = "sekee",
-        title = "سکه امامی",
+        key = "retail_sekee",
+        title = "سکه امامی (تک‌فروشی)",
         priceTomans = 0L,
         changePercent = 0.0,
         changeTomans = 0L,
@@ -49,8 +49,8 @@ data class MarketRatesState(
         sourceLabel = "TGJU (tgju.org/coin)"
     ),
     val robSekeh: MarketRateItem = MarketRateItem(
-        key = "rob",
-        title = "ربع سکه",
+        key = "retail_rob",
+        title = "ربع سکه (تک‌فروشی)",
         priceTomans = 0L,
         changePercent = 0.0,
         changeTomans = 0L,

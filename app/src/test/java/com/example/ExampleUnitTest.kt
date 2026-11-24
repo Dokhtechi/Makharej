@@ -1137,7 +1137,66 @@ class ExampleUnitTest {
     assertNull(emptyMarket.gold18k)
     assertNull(emptyMarket.bourse)
   }
+
+  @Test
+  fun testTgjuCoinPrioritizesRetailSekehEmamiAndRetailRob() {
+    val coinPageHtml = """
+      <ul class="info-bar">
+        <li id="l-sekee" class="high">
+          <h3>سکه امامی</h3>
+          <span class="info-price">740,000,000</span>
+          <span class="info-change">(1.00%) 7,000,000</span>
+        </li>
+        <li id="l-rob" class="low">
+          <h3>ربع سکه</h3>
+          <span class="info-price">210,000,000</span>
+          <span class="info-change">(0.50%) 1,000,000</span>
+        </li>
+      </ul>
+      <table>
+        <tr data-market-row="sekee">
+          <th>سکه امامی</th>
+          <td class="nf">740,000,000</td>
+          <td class="nf"><span class="high">(1.00%) 7,000,000</span></td>
+        </tr>
+        <tr data-market-row="rob">
+          <th>ربع سکه</th>
+          <td class="nf">210,000,000</td>
+          <td class="nf"><span class="low">(0.50%) 1,000,000</span></td>
+        </tr>
+      </table>
+      <table>
+        <tr data-market-row="retail_sekee">
+          <th><a href="/profile/retail_sekee">سکه امامی تک فروشی</a></th>
+          <td class="nf">762,500,000</td>
+          <td class="nf"><span class="high">(1.45%) 10,900,000</span></td>
+        </tr>
+        <tr data-market-row="retail_rob">
+          <th><a href="/profile/retail_rob">ربع سکه تک فروشی</a></th>
+          <td class="nf">224,000,000</td>
+          <td class="nf"><span class="low">(0.80%) 1,800,000</span></td>
+        </tr>
+      </table>
+    """.trimIndent()
+
+    val parsed = com.example.data.network.MarketRatesService.parseAllFromTgjuCoinHtml(coinPageHtml)
+    assertEquals("retail_sekee", parsed.sekehEmami?.key)
+    assertEquals("سکه امامی (تک‌فروشی)", parsed.sekehEmami?.title)
+    assertEquals(76_250_000L, parsed.sekehEmami?.priceTomans)
+    assertEquals(1_090_000L, parsed.sekehEmami?.changeTomans)
+    assertEquals(true, parsed.sekehEmami?.isPositiveChange)
+
+    assertEquals("retail_rob", parsed.robSekeh?.key)
+    assertEquals("ربع سکه (تک‌فروشی)", parsed.robSekeh?.title)
+    assertEquals(22_400_000L, parsed.robSekeh?.priceTomans)
+    assertEquals(180_000L, parsed.robSekeh?.changeTomans)
+    assertEquals(false, parsed.robSekeh?.isPositiveChange)
+
+    assertEquals("retail_sekee", com.example.data.network.TgjuChartAsset.SEKEH_EMAMI.symbol)
+    assertEquals("retail_rob", com.example.data.network.TgjuChartAsset.ROB_SEKEH.symbol)
+  }
 }
+
 
 
 

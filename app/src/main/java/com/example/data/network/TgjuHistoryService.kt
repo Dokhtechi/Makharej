@@ -63,9 +63,9 @@ enum class TgjuChartAsset(
         maxPlausiblePrice = 50_000_000.0
     ),
     SEKEH_EMAMI(
-        symbol = "sekee",
-        fallbackSymbols = listOf("retail_sekee"),
-        titleFa = "سکه امامی",
+        symbol = "retail_sekee",
+        fallbackSymbols = listOf("sekee"),
+        titleFa = "سکه امامی (تک‌فروشی)",
         unitFa = "تومان",
         isRialToToman = true,
         isUsdCurrency = false,
@@ -75,9 +75,9 @@ enum class TgjuChartAsset(
         maxPlausiblePrice = 500_000_000.0
     ),
     ROB_SEKEH(
-        symbol = "rob",
-        fallbackSymbols = listOf("retail_rob"),
-        titleFa = "ربع سکه",
+        symbol = "retail_rob",
+        fallbackSymbols = listOf("rob"),
+        titleFa = "ربع سکه (تک‌فروشی)",
         unitFa = "تومان",
         isRialToToman = true,
         isUsdCurrency = false,
