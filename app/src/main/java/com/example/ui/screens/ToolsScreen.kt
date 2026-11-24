@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.Percent
 import androidx.compose.material.icons.filled.Receipt
+import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -92,6 +93,7 @@ import androidx.compose.material3.LocalTextStyle
 import com.example.ui.components.InstallmentReminderCard
 import com.example.ui.components.MarketRatesCard
 import com.example.ui.components.ReceiptAttachmentToolCard
+import com.example.ui.components.StickyNotesBoardCard
 import com.example.ui.theme.OutfitFontFamily
 import com.example.ui.theme.ScaledDialogContent
 import com.example.ui.theme.appSecondaryTextColor
@@ -147,6 +149,14 @@ enum class ToolSection(
         accentDark = Color(0xFFF472B6),
         bgLight = Color(0xFFFCE7F3),
         bgDark = Color(0xFF500724)
+    ),
+    STICKY_NOTES(
+        title = "یادداشت‌های چسبان (Sticky Notes)",
+        icon = Icons.Default.StickyNote2,
+        accentLight = Color(0xFFD97706),
+        accentDark = Color(0xFFFBBF24),
+        bgLight = Color(0xFFFEF3C7),
+        bgDark = Color(0xFF78350F)
     );
 
     @Composable
@@ -176,13 +186,21 @@ fun ToolsScreen(
     viewModel: ExpenseViewModel,
     onAddExpenseWithAmount: (amount: Long) -> Unit,
     onAddExpenseWithReceipt: (receiptPath: String) -> Unit = {},
+    initialToolSection: ToolSection? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val allExpandedExpenses by viewModel.allExpandedExpenses.collectAsStateWithLifecycle()
     val marketRatesState by viewModel.marketRates.collectAsStateWithLifecycle()
-    var selectedTool by rememberSaveable { mutableStateOf<ToolSection?>(null) }
-    var isDropdownExpanded by rememberSaveable { mutableStateOf(true) }
+    var selectedTool by rememberSaveable { mutableStateOf<ToolSection?>(initialToolSection) }
+    var isDropdownExpanded by rememberSaveable { mutableStateOf(initialToolSection == null) }
+
+    LaunchedEffect(initialToolSection) {
+        if (initialToolSection != null) {
+            selectedTool = initialToolSection
+            isDropdownExpanded = false
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.refreshMarketRates()
@@ -410,22 +428,35 @@ fun ToolsScreen(
                             }
                         )
                     }
+                    ToolSection.STICKY_NOTES -> {
+                        StickyNotesBoardCard()
+                    }
                     null -> {}
                 }
             }
         }
 
-        // 3. قیمت روز ارز، طلا، سکه، رمزارز، بورس و نفت (از tgju.org/coin)
+        // 3. قیمت روز ارز، طلا، سکه، رمزارز و نفت (tgju.org و nobitex.ir)
         item {
             MarketRatesCard(
                 ratesState = marketRatesState,
                 onRefresh = {
-                    Toast.makeText(context, "در حال دریافت نرخ لحظه‌ای از tgju.org...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "در حال دریافت نرخ لحظه‌ای بازار...", Toast.LENGTH_SHORT).show()
                     viewModel.refreshMarketRates { ok ->
                         val msg = if (ok) {
-                            "قیمت‌های بازار از tgju.org به‌روزرسانی شد"
+                            "قیمت‌های بازار به‌روزرسانی شد"
                         } else {
                             "خطا در دریافت نرخ جدید؛ اتصال اینترنت را بررسی کنید"
+                        }
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onRefreshTetherOnly = {
+                    viewModel.refreshTetherRateOnly { ok ->
+                        val msg = if (ok) {
+                            "قیمت تتر از نوبیتکس به‌روزرسانی شد"
+                        } else {
+                            "خطا در دریافت قیمت تتر از نوبیتکس"
                         }
                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     }

@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +27,8 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Warning
@@ -677,4 +681,318 @@ fun AnnualCommitmentCard(
         )
     }
 }
+
+/**
+ * Embedded expandable card version of the Annual Commitments ("تعهدات") screen placed inside
+ * AddExpenseBottomSheet, preserving the exact visual structure, summary banner, add action,
+ * and full list of AnnualCommitmentCard items (with edit, delete, receipt preview, and share).
+ */
+@Composable
+fun AnnualCommitmentsEmbeddedCard(
+    annualExpenses: List<ExpenseEntity>,
+    totalAnnual: Long,
+    monthlyShare: Long,
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onAddAnnualExpenseClick: () -> Unit,
+    onEditAnnualExpense: (ExpenseEntity) -> Unit,
+    onDeleteAnnualExpense: (ExpenseEntity) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("annual_commitments_embedded_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
+        border = BorderStroke(1.5.dp, Color(0xFFF59E0B)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Clickable Header Row (Always visible, >= 48dp touch target)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .clickable(onClick = onToggleExpand)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .testTag("annual_commitments_card_toggle"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xFFFEF3C7),
+                        border = BorderStroke(1.dp, Color(0xFFFCD34D)),
+                        modifier = Modifier.size(scaledDp(36f))
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = "تعهدات سالانه",
+                                tint = Color(0xFFD97706),
+                                modifier = Modifier.size(scaledDp(20f))
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "تعهدات سالانه و هزینه‌های دوره‌ای",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF92400E),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (annualExpenses.isNotEmpty()) {
+                                enDigits("${annualExpenses.size} مورد • سهم ماهانه: ${PersianDateHelper.formatCurrency(monthlyShare)}")
+                            } else {
+                                enDigits("سرشکن شدن هزینه‌های بیمه به 12 ماه سال")
+                            },
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (annualExpenses.isNotEmpty()) Color(0xFF047857) else Color(0xFFB45309),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (expanded) Color(0xFFD97706) else Color(0xFFFEF3C7),
+                    border = BorderStroke(1.dp, Color(0xFFF59E0B))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = if (expanded) "بستن" else "تعهدات",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (expanded) Color.White else Color(0xFF92400E),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                        Icon(
+                            imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (expanded) "بستن تعهدات" else "باز کردن تعهدات",
+                            tint = if (expanded) Color.White else Color(0xFF92400E),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            // Full Annual Commitments Structure (exact layout preserved!)
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    HorizontalDivider(color = Color(0xFFFDE68A), thickness = 1.dp)
+
+                    // Cheerful Annual Summary & Monthly Share Logic Banner (exact same structure)
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        border = BorderStroke(1.2.dp, Color(0xFFF59E0B)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Shield,
+                                        contentDescription = null,
+                                        tint = Color(0xFFD97706),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "کل تعهدات سالانه:",
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF92400E)
+                                    )
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFFEF3C7),
+                                    border = BorderStroke(1.dp, Color(0xFFFDE68A))
+                                ) {
+                                    Text(
+                                        text = enDigits("تقسیم بر 12 ماه"),
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF92400E),
+                                        modifier = Modifier.padding(horizontal = scaledDp(8f), vertical = scaledDp(3f)),
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = enDigits(PersianDateHelper.formatCurrency(totalAnnual)),
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFFB45309),
+                                modifier = Modifier.padding(start = 24.dp)
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            HorizontalDivider(color = Color(0xFFFDE68A).copy(alpha = 0.7f), thickness = 1.dp)
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.CalendarMonth,
+                                    contentDescription = null,
+                                    tint = Color(0xFF059669),
+                                    modifier = Modifier.size(scaledDp(16f))
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "سرشکن ماهانه (سهم هر ماه):",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF065F46)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = enDigits("${PersianDateHelper.formatCurrency(monthlyShare)}/ماه"),
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF059669),
+                                modifier = Modifier.padding(start = 22.dp)
+                            )
+                        }
+                    }
+
+                    // Add New Annual Commitment Button
+                    Button(
+                        onClick = onAddAnnualExpenseClick,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = scaledDp(48f))
+                            .testTag("add_new_annual_commitment_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "ثبت تعهد سالانه جدید (بیمه، خودرو، موتور...)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            softWrap = true
+                        )
+                    }
+
+                    // List Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "لیست تعهدات سالانه ثبت‌شده",
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF78350F),
+                            softWrap = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = enDigits("${annualExpenses.size} مورد"),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF92400E),
+                            softWrap = true
+                        )
+                    }
+
+                    if (annualExpenses.isEmpty()) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.85f))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(18.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Shield,
+                                    contentDescription = null,
+                                    tint = Color(0xFFD97706),
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "هنوز تعهد سالانه‌ای ثبت نکرده‌اید",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF78350F)
+                                )
+                            }
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            annualExpenses.forEach { entity ->
+                                AnnualCommitmentCard(
+                                    entity = entity,
+                                    onEditClick = { onEditAnnualExpense(entity) },
+                                    onDeleteClick = { onDeleteAnnualExpense(entity) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 

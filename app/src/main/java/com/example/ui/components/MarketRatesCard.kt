@@ -67,6 +67,7 @@ import java.util.Locale
 fun MarketRatesCard(
     ratesState: MarketRatesState,
     onRefresh: () -> Unit,
+    onRefreshTetherOnly: () -> Unit = onRefresh,
     modifier: Modifier = Modifier
 ) {
     var activeTgjuHistoryAsset by remember { mutableStateOf<Pair<com.example.data.network.TgjuChartAsset, Double?>?>(null) }
@@ -370,15 +371,18 @@ fun MarketRatesCard(
                     titleColor = Color(0xFF0F766E),
                     chartTestTag = null,
                     onChartClick = null,
-                    isLoading = ratesState.isLoading,
-                    onRetryClick = onRefresh,
+                    isLoading = ratesState.isLoading || ratesState.isTetherRefreshing,
+                    onRetryClick = onRefreshTetherOnly,
+                    onItemRefreshClick = onRefreshTetherOnly,
+                    isItemRefreshing = ratesState.isTetherRefreshing,
+                    itemRefreshTestTag = "refresh_tether_only_button",
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
             }
 
             Spacer(modifier = Modifier.height(7.dp))
 
-            // Row 5: Tehran Stock Exchange and Brent Crude Oil
+            // Row 5: GRAM Cryptocurrency (Nobitex) and Brent Crude Oil
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -386,20 +390,22 @@ fun MarketRatesCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 MarketRateColumnItem(
-                    item = ratesState.bourse,
+                    item = ratesState.gram,
                     symbol = "",
-                    badgeColor = Color(0xFF2563EB),
-                    gradientColors = listOf(Color(0xFFEFF6FF), Color(0xFFDBEAFE)),
-                    borderColor = Color(0xFF93C5FD),
-                    titleColor = Color(0xFF1E40AF),
-                    chartTestTag = "market_rate_bourse_chart",
+                    badgeColor = Color(0xFF0284C7),
+                    gradientColors = listOf(Color(0xFFF0F9FF), Color(0xFFE0F2FE)),
+                    borderColor = Color(0xFF7DD3FC),
+                    titleColor = Color(0xFF0369A1),
+                    chartTestTag = "market_rate_gram_chart",
                     onChartClick = {
-                        val liveStr = ratesState.bourse.displayPriceFormatted
-                            ?.replace(",", "")?.replace("واحد", "")?.trim()
+                        val liveStr = ratesState.gram.displayPriceFormatted
+                            ?.replace("$", "")?.replace(",", "")?.replace("دلار", "")?.trim()
                         val live = liveStr?.let { PersianDateHelper.toEnglishDigits(it).toDoubleOrNull() }
-                            ?: ratesState.bourse.priceTomans.takeIf { it > 0L }?.toDouble()
-                        activeTgjuHistoryAsset = com.example.data.network.TgjuChartAsset.BOURSE to live
+                            ?: ratesState.gram.priceTomans.takeIf { it > 0L }?.toDouble()
+                        activeTgjuHistoryAsset = com.example.data.network.TgjuChartAsset.GRAM to live
                     },
+                    isLoading = ratesState.isLoading,
+                    onRetryClick = onRefresh,
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
 
@@ -445,7 +451,10 @@ private fun MarketRateColumnItem(
     chartTestTag: String? = null,
     onChartClick: (() -> Unit)? = null,
     isLoading: Boolean = false,
-    onRetryClick: (() -> Unit)? = null
+    onRetryClick: (() -> Unit)? = null,
+    onItemRefreshClick: (() -> Unit)? = null,
+    isItemRefreshing: Boolean = false,
+    itemRefreshTestTag: String? = null
 ) {
     val uiScale = LocalAppFontScale.current
     val isGreen = item.isPositiveChange
@@ -540,6 +549,35 @@ private fun MarketRateColumnItem(
                                     maxLines = 1,
                                     softWrap = false
                                 )
+                            }
+                        }
+                    } else if (onItemRefreshClick != null) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = badgeColor.copy(alpha = 0.16f),
+                            border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.6f)),
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .then(if (itemRefreshTestTag != null) Modifier.testTag(itemRefreshTestTag) else Modifier)
+                                .clickable(enabled = !isItemRefreshing) { onItemRefreshClick() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                if (isItemRefreshing) {
+                                    CircularProgressIndicator(
+                                        color = badgeColor,
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "به‌روزرسانی مستقل ${item.title}",
+                                        tint = badgeColor,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
                     }

@@ -329,13 +329,13 @@ class ExampleUnitTest {
   }
 
   @Test
-  fun testTgjuCoinHtmlBourseAndOilParser() {
+  fun testTgjuCoinHtmlGramAndOilParser() {
     val sampleHtml = """
       <ul class="info-bar mobile-hide">
-        <li id="l-bourse">
-          <span class="info-title">شاخص بورس</span>
-          <span class="info-price">2,145,320</span>
-          <span class="info-change high">14,200</span>
+        <li id="l-crypto-gram">
+          <span class="info-title">گرام (GRAM)</span>
+          <span class="info-price">0.00245</span>
+          <span class="info-change high">(2.15%) 0.00005</span>
         </li>
         <li id="l-oil_brent" class="low">
           <span class="info-title">نفت برنت</span>
@@ -345,10 +345,11 @@ class ExampleUnitTest {
       </ul>
     """.trimIndent()
 
-    val (bourse, oil) = com.example.data.network.MarketRatesService.parseBourseAndOilFromTgjuCoinHtml(sampleHtml)
-    assertEquals(2_145_320L, bourse?.priceTomans)
-    assertEquals(14_200L, bourse?.changeTomans)
-    assertEquals(true, bourse?.isPositiveChange)
+    val (gram, oil) = com.example.data.network.MarketRatesService.parseGramAndOilFromTgjuCoinHtml(sampleHtml)
+    assertEquals("crypto-gram", gram?.key)
+    assertEquals("$0.00245", gram?.displayPriceFormatted)
+    assertEquals("$0.00005", gram?.displayDiffFormatted)
+    assertEquals(true, gram?.isPositiveChange)
     assertEquals(74L, oil?.priceTomans)
     assertEquals("$73.80", oil?.displayPriceFormatted)
     assertEquals("$0.42", oil?.displayDiffFormatted)
@@ -389,10 +390,10 @@ class ExampleUnitTest {
           <span class="info-price">828,000</span>
           <span class="info-change">(0.36%) 3,000</span>
         </li>
-        <li id="l-bourse" class="high">
-          <h3>شاخص بورس</h3>
-          <span class="info-price">2,845,120</span>
-          <span class="info-change">(0.54%) 15,420</span>
+        <li id="l-crypto-gram" class="high">
+          <h3>گرام</h3>
+          <span class="info-price">3.45</span>
+          <span class="info-change">(1.47%) 0.05</span>
         </li>
         <li id="l-oil_brent" class="low">
           <h3>نفت برنت</h3>
@@ -449,9 +450,9 @@ class ExampleUnitTest {
     assertEquals(300L, htmlRates.tether?.changeTomans)
     assertEquals(true, htmlRates.tether?.isPositiveChange)
 
-    assertEquals(2_845_120L, htmlRates.bourse?.priceTomans)
-    assertEquals(15_420L, htmlRates.bourse?.changeTomans)
-    assertEquals(true, htmlRates.bourse?.isPositiveChange)
+    assertEquals("$3.45", htmlRates.gram?.displayPriceFormatted)
+    assertEquals("$0.0500", htmlRates.gram?.displayDiffFormatted)
+    assertEquals(true, htmlRates.gram?.isPositiveChange)
 
     assertEquals("$73.45", htmlRates.crudeOil?.displayPriceFormatted)
     assertEquals("$0.85", htmlRates.crudeOil?.displayDiffFormatted)
@@ -822,12 +823,21 @@ class ExampleUnitTest {
     assertEquals(1, btcPts.size)
     assertEquals(92450.0, btcPts[0].price, 0.01)
 
-    val bourseJson = """{"data":[["2,830,000","2,825,000","2,850,000","2,845,120","15,120","0.53%","2026/11/23","1405/09/02"]]}"""
-    val boursePts = com.example.data.network.TgjuHistoryService.parseSummaryTableJson(
-      bourseJson, com.example.data.network.TgjuChartAsset.BOURSE
-    )
-    assertEquals(1, boursePts.size)
-    assertEquals(2845120.0, boursePts[0].price, 0.5)
+    val gramUdfJson = """{"s":"ok","t":[1711324800,1795478400],"h":[0.55,0.985],"l":[0.49,0.941],"c":[0.52,0.962]}"""
+    val gramPts = com.example.data.network.TgjuHistoryService.parseNobitexUdfHistoryJson(gramUdfJson)
+    assertEquals(2, gramPts.size)
+    assertEquals(0.52, gramPts.first().price, 0.0001)
+    assertEquals(0.962, gramPts.last().price, 0.0001)
+    assertEquals("nobitex-gram-usdt", com.example.data.network.TgjuChartAsset.GRAM.symbol)
+    assertFalse(com.example.data.network.TgjuChartAsset.GRAM.isRialToToman)
+    assertTrue(com.example.data.network.TgjuChartAsset.GRAM.isUsdCurrency)
+    assertEquals("دلار", com.example.data.network.TgjuChartAsset.GRAM.unitFa)
+
+    val gramProfileHtml = """<div><span data-col="info.last_trade.PDrCotVal">0.0342</span><span data-col="info.last_trade.PDrCotVal_diff">-0.0012</span><span data-col="info.last_trade.PDrCotVal_percent">-3.39</span></div>"""
+    val gramProfile = com.example.data.network.MarketRatesService.parseGramFromProfileHtml(gramProfileHtml)
+    assertNotNull(gramProfile)
+    assertEquals("$0.0342", gramProfile?.displayPriceFormatted)
+    assertEquals(false, gramProfile?.isPositiveChange)
 
     val oilJson = """{"data":[["74.10","73.10","74.50","73.45","0.65","0.88%","2026/11/23","1405/09/02"]]}"""
     val oilPts = com.example.data.network.TgjuHistoryService.parseSummaryTableJson(
@@ -1135,7 +1145,7 @@ class ExampleUnitTest {
     )
     assertNull(emptyMarket.dollar)
     assertNull(emptyMarket.gold18k)
-    assertNull(emptyMarket.bourse)
+    assertNull(emptyMarket.gram)
   }
 
   @Test
@@ -1195,7 +1205,318 @@ class ExampleUnitTest {
     assertEquals("retail_sekee", com.example.data.network.TgjuChartAsset.SEKEH_EMAMI.symbol)
     assertEquals("retail_rob", com.example.data.network.TgjuChartAsset.ROB_SEKEH.symbol)
   }
+
+  @Test
+  fun testNobitexTetherAndGramParsersAndUdfHistory() {
+    // 1. Default MarketRatesState reflects Nobitex source (Tether in Tomans, GRAM in USD) + independent refresh flag
+    val defaultState = com.example.data.model.MarketRatesState()
+    assertEquals("nobitex-usdt", defaultState.tether.key)
+    assertEquals("تومان", defaultState.tether.unitLabel)
+    assertEquals("nobitex-gram", defaultState.gram.key)
+    assertEquals("دلار", defaultState.gram.unitLabel)
+    assertFalse(defaultState.isTetherRefreshing)
+
+    // 2. Nobitex /market/stats JSON (usdt-rls in Tomans, gram-usdt in USD)
+    val statsJson = """
+      {
+        "status": "ok",
+        "stats": {
+          "usdt-rls": {
+            "isClosed": false,
+            "bestSell": "2792000",
+            "bestBuy": "2789000",
+            "latest": "2790500",
+            "dayOpen": "2760000",
+            "dayChange": "1.10"
+          },
+          "gram-usdt": {
+            "isClosed": false,
+            "bestSell": "0.964",
+            "bestBuy": "0.960",
+            "latest": "0.962",
+            "dayOpen": "0.971",
+            "dayChange": "-0.93"
+          }
+        }
+      }
+    """.trimIndent()
+    val parsedStats = com.example.data.network.NobitexMarketService.parseStatsJson(statsJson)
+    assertNotNull(parsedStats.tether)
+    assertEquals("nobitex-usdt", parsedStats.tether!!.key)
+    assertEquals(279_050L, parsedStats.tether!!.priceTomans)
+    assertEquals(3_050L, parsedStats.tether!!.changeTomans)
+    assertEquals(1.10, parsedStats.tether!!.changePercent, 0.01)
+    assertTrue(parsedStats.tether!!.isPositiveChange)
+    assertEquals(com.example.data.network.NobitexMarketService.SOURCE_LABEL, parsedStats.tether!!.sourceLabel)
+
+    assertNotNull(parsedStats.gram)
+    assertEquals("nobitex-gram", parsedStats.gram!!.key)
+    assertEquals("دلار", parsedStats.gram!!.unitLabel)
+    assertEquals("$0.962", parsedStats.gram!!.displayPriceFormatted)
+    assertEquals(0.93, parsedStats.gram!!.changePercent, 0.01)
+    assertFalse(parsedStats.gram!!.isPositiveChange)
+
+    // 2b. Cross-rate fallback: if only gram-rls + usdt-rls exist, GRAM is still derived in USD
+    val crossRateJson = """
+      {
+        "status": "ok",
+        "stats": {
+          "usdt-rls": {"isClosed": false, "latest": "2800000", "dayChange": "0.20"},
+          "gram-rls": {"isClosed": false, "latest": "2688000", "dayChange": "1.50"}
+        }
+      }
+    """.trimIndent()
+    val parsedCross = com.example.data.network.NobitexMarketService.parseStatsJson(crossRateJson)
+    assertEquals("دلار", parsedCross.gram?.unitLabel)
+    assertEquals("$0.960", parsedCross.gram?.displayPriceFormatted)
+    assertTrue(parsedCross.gram?.isPositiveChange == true)
+
+    // 3. Nobitex orderbook JSON (USDTIRT in Tomans, GRAMUSDT in USD)
+    val usdtOrderbook = """{"status":"ok","lastTradePrice":"2784000","asks":[["2785000","50"]],"bids":[["2783000","40"]]}"""
+    val parsedUsdtOb = com.example.data.network.NobitexMarketService.parseOrderbookJson(
+      jsonText = usdtOrderbook,
+      key = "nobitex-usdt",
+      title = "تتر (USDT)",
+      minTomans = 10_000L,
+      previousTomans = 278_000L
+    )
+    assertNotNull(parsedUsdtOb)
+    assertEquals(278_400L, parsedUsdtOb!!.priceTomans)
+    assertEquals(400L, parsedUsdtOb.changeTomans)
+    assertTrue(parsedUsdtOb.isPositiveChange)
+
+    val gramUsdtOrderbook = """{"status":"ok","asks":[["0.966","100"]],"bids":[["0.960","120"]]}"""
+    val parsedGramOb = com.example.data.network.NobitexMarketService.parseOrderbookUsdJson(
+      jsonText = gramUsdtOrderbook,
+      key = "nobitex-gram",
+      title = "گرام (GRAM)",
+      previousUsd = 0.950
+    )
+    assertNotNull(parsedGramOb)
+    assertEquals("دلار", parsedGramOb!!.unitLabel)
+    assertEquals("$0.963", parsedGramOb.displayPriceFormatted)
+    assertTrue(parsedGramOb.isPositiveChange)
+
+    // 4. Nobitex HTML / embedded SSR JSON fallback (nobitex.ir/price/gram)
+    val embeddedSsrHtml = """<html><body><script>window.__STATE__={"gram-usdt":{"isClosed":false,"latest":"0.9625","dayChange":"2.15"},"usdt-rls":{"isClosed":false,"latest":"2788000","dayChange":"-0.30"}};</script></body></html>"""
+    val gramFromSsr = com.example.data.network.NobitexMarketService.parseGramFromPageHtml(embeddedSsrHtml)
+    val usdtFromSsr = com.example.data.network.NobitexMarketService.parseTetherFromPageHtml(embeddedSsrHtml)
+    assertEquals("دلار", gramFromSsr?.unitLabel)
+    assertEquals("$0.9625", gramFromSsr?.displayPriceFormatted)
+    assertTrue(gramFromSsr?.isPositiveChange == true)
+    assertEquals(278_800L, usdtFromSsr?.priceTomans)
+    assertFalse(usdtFromSsr?.isPositiveChange == true)
+
+    val persianTextHtml = """<div><h1>قیمت لحظه‌ای گرام</h1><span>0.962 دلار</span><span>+1.4%</span><p>قیمت تتر (USDT): ۲۷۸,۴۰۰ تومان</p></div>"""
+    val gramFromText = com.example.data.network.NobitexMarketService.parseGramFromPageHtml(persianTextHtml)
+    val usdtFromText = com.example.data.network.NobitexMarketService.parseTetherFromPageHtml(persianTextHtml)
+    assertEquals("دلار", gramFromText?.unitLabel)
+    assertEquals("$0.962", gramFromText?.displayPriceFormatted)
+    assertEquals(278_400L, usdtFromText?.priceTomans)
+
+    // 5. Nobitex TradingView UDF daily history parser for GRAMUSDT (USD directly, no ÷ 10)
+    val udfJson = """
+      {
+        "s": "ok",
+        "t": [1735689600, 1735776000, 1735862400],
+        "h": [0.910, 0.945, 0.980],
+        "l": [0.875, 0.902, 0.940],
+        "c": [0.895, 0.930, 0.962]
+      }
+    """.trimIndent()
+    val udfPoints = com.example.data.network.TgjuHistoryService.parseNobitexUdfHistoryJson(udfJson)
+    assertEquals(3, udfPoints.size)
+    assertEquals(0.895, udfPoints[0].price, 0.0001)
+    assertEquals(0.910, udfPoints[0].high, 0.0001)
+    assertEquals(0.875, udfPoints[0].low, 0.0001)
+    assertEquals(0.962, udfPoints[2].price, 0.0001)
+    assertTrue(udfPoints[0].epochMs < udfPoints[1].epochMs)
+    assertTrue(udfPoints[1].epochMs < udfPoints[2].epochMs)
+  }
+
+  @Test
+  fun testTgjuFifteenYearExtremesFinder() {
+    assertNull(com.example.data.network.TgjuHistoryService.findFifteenYearExtremes(emptyList()))
+
+    val dayMs = 86_400_000L
+    val latestMs = 1_795_478_400_000L // ~1405/09/03
+    fun mkPt(daysAgo: Long, price: Double, shamsi: String, year: Int, month: Int, day: Int) =
+      com.example.data.network.TgjuHistoryPoint(
+        epochMs = latestMs - daysAgo * dayMs,
+        price = price,
+        high = price,
+        low = price,
+        shamsiDate = shamsi,
+        shamsiYear = year,
+        shamsiMonth = month,
+        shamsiDay = day,
+        weekdayFa = "شنبه",
+        shortWeekdayFa = "شنبه",
+        monthDayFa = "$day فروردین"
+      )
+
+    val series = listOf(
+      // Older than 15 years (~17 years ago) -> MUST be excluded from 15-year window
+      mkPt(daysAgo = 6200L, price = 900.0, shamsi = "1388/05/01", year = 1388, month = 5, day = 1),
+      mkPt(daysAgo = 6100L, price = 999_999.0, shamsi = "1388/08/10", year = 1388, month = 8, day = 10),
+      // Within 15-year window
+      mkPt(daysAgo = 5400L, price = 1_120.0, shamsi = "1390/02/10", year = 1390, month = 2, day = 10),
+      mkPt(daysAgo = 3000L, price = 14_500.0, shamsi = "1397/06/15", year = 1397, month = 6, day = 15),
+      mkPt(daysAgo = 120L, price = 118_500.0, shamsi = "1405/05/04", year = 1405, month = 5, day = 4),
+      mkPt(daysAgo = 0L, price = 112_000.0, shamsi = "1405/09/03", year = 1405, month = 9, day = 3)
+    )
+
+    val extremes = com.example.data.network.TgjuHistoryService.findFifteenYearExtremes(series)
+    assertNotNull(extremes)
+    assertEquals("1405/05/04", extremes!!.highestPoint.shamsiDate)
+    assertEquals(118_500.0, extremes.highestPoint.price, 0.01)
+    assertEquals("1390/02/10", extremes.lowestPoint.shamsiDate)
+    assertEquals(1_120.0, extremes.lowestPoint.price, 0.01)
+
+    // Short-history asset (< 15 years) evaluates all available points cleanly
+    val shortSeries = listOf(
+      mkPt(daysAgo = 400L, price = 0.52, shamsi = "1404/07/20", year = 1404, month = 7, day = 20),
+      mkPt(daysAgo = 100L, price = 1.15, shamsi = "1405/05/25", year = 1405, month = 5, day = 25),
+      mkPt(daysAgo = 0L, price = 0.96, shamsi = "1405/09/03", year = 1405, month = 9, day = 3)
+    )
+    val shortExtremes = com.example.data.network.TgjuHistoryService.findFifteenYearExtremes(shortSeries)
+    assertNotNull(shortExtremes)
+    assertEquals("1405/05/25", shortExtremes!!.highestPoint.shamsiDate)
+    assertEquals("1404/07/20", shortExtremes.lowestPoint.shamsiDate)
+
+    // Selected-range extremes (6M vs 3Y vs 5Y vs 10Y vs FROM_1390) + 3Y/5Y/10Y range presence
+    assertEquals("۳ سال", com.example.data.network.TgjuChartRange.YEAR_3.labelFa)
+    assertEquals("۵ سال", com.example.data.network.TgjuChartRange.YEAR_5.labelFa)
+    assertEquals("۱۰ سال", com.example.data.network.TgjuChartRange.YEAR_10.labelFa)
+
+    val multiRangeSeries = listOf(
+      mkPt(daysAgo = 5000L, price = 1_100.0, shamsi = "1391/01/15", year = 1391, month = 1, day = 15),
+      mkPt(daysAgo = 3000L, price = 14_000.0, shamsi = "1397/06/15", year = 1397, month = 6, day = 15),
+      mkPt(daysAgo = 1500L, price = 32_000.0, shamsi = "1401/07/20", year = 1401, month = 7, day = 20),
+      mkPt(daysAgo = 750L, price = 54_000.0, shamsi = "1403/08/10", year = 1403, month = 8, day = 10),
+      mkPt(daysAgo = 150L, price = 88_000.0, shamsi = "1405/04/05", year = 1405, month = 4, day = 5),
+      mkPt(daysAgo = 60L, price = 122_000.0, shamsi = "1405/07/04", year = 1405, month = 7, day = 4),
+      mkPt(daysAgo = 0L, price = 115_000.0, shamsi = "1405/09/03", year = 1405, month = 9, day = 3)
+    )
+    val pts6m = com.example.data.network.TgjuHistoryService.filterPointsForRange(
+      multiRangeSeries, com.example.data.network.TgjuChartRange.MONTH_6
+    )
+    val ext6m = com.example.data.network.TgjuHistoryService.findRangeExtremes(pts6m)
+    assertEquals("1405/07/04", ext6m?.highestPoint?.shamsiDate)
+    assertEquals("1405/04/05", ext6m?.lowestPoint?.shamsiDate)
+
+    val pts3y = com.example.data.network.TgjuHistoryService.filterPointsForRange(
+      multiRangeSeries, com.example.data.network.TgjuChartRange.YEAR_3
+    )
+    val ext3y = com.example.data.network.TgjuHistoryService.findRangeExtremes(pts3y)
+    assertEquals("1405/07/04", ext3y?.highestPoint?.shamsiDate)
+    assertEquals("1403/08/10", ext3y?.lowestPoint?.shamsiDate)
+
+    val pts5y = com.example.data.network.TgjuHistoryService.filterPointsForRange(
+      multiRangeSeries, com.example.data.network.TgjuChartRange.YEAR_5
+    )
+    val ext5y = com.example.data.network.TgjuHistoryService.findRangeExtremes(pts5y)
+    assertEquals("1405/07/04", ext5y?.highestPoint?.shamsiDate)
+    assertEquals("1401/07/20", ext5y?.lowestPoint?.shamsiDate)
+
+    val pts10y = com.example.data.network.TgjuHistoryService.filterPointsForRange(
+      multiRangeSeries, com.example.data.network.TgjuChartRange.YEAR_10
+    )
+    val ext10y = com.example.data.network.TgjuHistoryService.findRangeExtremes(pts10y)
+    assertEquals("1405/07/04", ext10y?.highestPoint?.shamsiDate)
+    assertEquals("1397/06/15", ext10y?.lowestPoint?.shamsiDate)
+
+    assertEquals(
+      com.example.data.network.TgjuChartRange.YEAR_3,
+      com.example.data.network.TgjuHistoryService.bestRangeForPoint(multiRangeSeries, multiRangeSeries[3])
+    )
+    assertEquals(
+      com.example.data.network.TgjuChartRange.YEAR_5,
+      com.example.data.network.TgjuHistoryService.bestRangeForPoint(multiRangeSeries, multiRangeSeries[2])
+    )
+    assertEquals(
+      com.example.data.network.TgjuChartRange.YEAR_10,
+      com.example.data.network.TgjuHistoryService.bestRangeForPoint(multiRangeSeries, multiRangeSeries[1])
+    )
+  }
+
+  @Test
+  fun testStickyNotesPersistenceAlarmPopupAndDingSound() {
+    val sampleStrokes = listOf(
+      com.example.data.model.HandwritingStroke(
+        colorHex = 0xFF1D4ED8L,
+        strokeWidthDp = 4.8f,
+        points = listOf(
+          com.example.data.model.StrokePoint(0.12f, 0.25f),
+          com.example.data.model.StrokePoint(0.45f, 0.50f),
+          com.example.data.model.StrokePoint(0.78f, 0.35f)
+        )
+      )
+    )
+    val note = com.example.data.model.StickyNoteItem(
+      id = "sticky-1",
+      title = "پرداخت بیمه خودرو",
+      textContent = "تمدید بیمه‌نامه شخص ثالث تا پایان هفته",
+      strokes = sampleStrokes,
+      mode = com.example.data.model.StickyNoteMode.MIXED,
+      colorId = com.example.data.model.StickyNoteColor.SUNSHINE.id,
+      isPinnedTop = true,
+      alarmEnabled = true,
+      alarmShamsiDate = "1405/09/15",
+      alarmHour = 10,
+      alarmMinute = 30,
+      pinInNotification = true,
+      popupReminderEnabled = true,
+      popupIntervalMinutes = 45,
+      playDingSound = true
+    )
+
+    val json = com.example.data.model.StickyNoteStorage.serializeNotes(listOf(note))
+    val restored = com.example.data.model.StickyNoteStorage.deserializeNotes(json)
+    assertEquals(1, restored.size)
+    val item = restored[0]
+    assertEquals("sticky-1", item.id)
+    assertEquals("پرداخت بیمه خودرو", item.title)
+    assertEquals("تمدید بیمه‌نامه شخص ثالث تا پایان هفته", item.textContent)
+    assertEquals(com.example.data.model.StickyNoteMode.MIXED, item.mode)
+    assertTrue(item.hasHandwriting)
+    assertTrue(item.hasTypedText)
+    assertEquals(1, item.strokes.size)
+    assertEquals(3, item.strokes[0].points.size)
+    assertEquals(0.45f, item.strokes[0].points[1].x, 0.001f)
+    assertTrue(item.alarmEnabled)
+    assertEquals("1405/09/15", item.alarmShamsiDate)
+    assertEquals("10:30", item.formattedAlarmTime())
+    assertTrue(item.pinInNotification)
+    assertTrue(item.popupReminderEnabled)
+    assertEquals(45, item.popupIntervalMinutes)
+    assertTrue(item.playDingSound)
+
+    // Shamsi date + hour/minute alarm timestamp conversion
+    val alarmEpoch = com.example.utils.StickyNoteNotificationHelper.computeAlarmEpochMs("1405/09/15", 10, 30)
+    assertNotNull(alarmEpoch)
+    val restoredShamsi = com.example.utils.PersianDateHelper.getShamsiDate(alarmEpoch!!)
+    assertEquals("1405/09/15", restoredShamsi.format())
+
+    // Next timed pop-up calculation & Persian labels
+    val nowMs = 1_795_500_000_000L
+    val nextPopup = com.example.utils.StickyNoteNotificationHelper.computeNextPopupEpochMs(nowMs, 30)
+    assertEquals(nowMs + 30 * 60_000L, nextPopup)
+    assertEquals("هر 15 دقیقه", com.example.data.model.StickyNoteStorage.formatPopupIntervalLabel(15))
+    assertEquals("هر 1 ساعت", com.example.data.model.StickyNoteStorage.formatPopupIntervalLabel(60))
+    assertEquals("روزانه (24 ساعت)", com.example.data.model.StickyNoteStorage.formatPopupIntervalLabel(1440))
+
+    // Crystal "Ding!" bell chime PCM wave validation
+    val pcm = com.example.utils.StickyNoteSoundPlayer.generateDingPcmSamples()
+    assertTrue("Ding chime should have ~430ms of 44.1kHz PCM samples", pcm.size > 15_000)
+    val peakStart = pcm.take(3000).maxOf { kotlin.math.abs(it.toInt()) }
+    val peakTail = pcm.takeLast(1500).maxOf { kotlin.math.abs(it.toInt()) }
+    assertTrue("Ding chime should have audible bell attack peak", peakStart > 8_000)
+    assertTrue("Ding chime should smoothly decay toward silence", peakTail < peakStart / 2)
+  }
 }
+
+
 
 
 

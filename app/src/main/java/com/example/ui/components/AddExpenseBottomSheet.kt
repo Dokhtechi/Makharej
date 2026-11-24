@@ -122,6 +122,7 @@ import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.data.model.ExpenseEntity
 import com.example.data.repository.FolderMatcher
+import com.example.ui.screens.AnnualCommitmentsEmbeddedCard
 import com.example.ui.theme.OutfitFontFamily
 import com.example.ui.theme.ScaledDialogContent
 import com.example.ui.theme.appSecondaryTextColor
@@ -154,7 +155,12 @@ fun AddExpenseBottomSheet(
     initialIsAnnual: Boolean = false,
     initialAmount: Long? = null,
     initialTitle: String? = null,
-    initialReceiptPath: String? = null
+    initialReceiptPath: String? = null,
+    annualExpenses: List<ExpenseEntity> = emptyList(),
+    totalAnnualCommitments: Long = 0L,
+    monthlyAmortizedShare: Long = 0L,
+    onEditAnnualExpense: ((ExpenseEntity) -> Unit)? = null,
+    onDeleteAnnualExpense: ((ExpenseEntity) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val prefs = remember(context) {
@@ -232,6 +238,7 @@ fun AddExpenseBottomSheet(
     var showDatePicker by remember { mutableStateOf(false) }
     var showVoiceDialog by remember { mutableStateOf(false) }
     var showReceiptPreview by remember { mutableStateOf(false) }
+    var isCommitmentsExpanded by remember(expenseToEdit) { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
 
     val sheetTakePictureLauncher = rememberLauncherForActivityResult(
@@ -473,6 +480,36 @@ fun AddExpenseBottomSheet(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
+
+            // Embedded Annual Commitments ("تعهدات") expandable card
+            if (!isEditing && (onDeleteAnnualExpense != null || annualExpenses.isNotEmpty())) {
+                AnnualCommitmentsEmbeddedCard(
+                    annualExpenses = annualExpenses,
+                    totalAnnual = totalAnnualCommitments,
+                    monthlyShare = monthlyAmortizedShare,
+                    expanded = isCommitmentsExpanded,
+                    onToggleExpand = { isCommitmentsExpanded = !isCommitmentsExpanded },
+                    onAddAnnualExpenseClick = {
+                        isAnnual = true
+                        isCommitmentsExpanded = false
+                        Toast.makeText(
+                            context,
+                            "حالت ثبت تعهد سالانه فعال شد؛ عنوان و مبلغ را وارد کنید",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        coroutineScope.launch { scrollState.animateScrollTo(0) }
+                    },
+                    onEditAnnualExpense = { entity ->
+                        isCommitmentsExpanded = false
+                        coroutineScope.launch { scrollState.animateScrollTo(0) }
+                        onEditAnnualExpense?.invoke(entity)
+                    },
+                    onDeleteAnnualExpense = { entity ->
+                        onDeleteAnnualExpense?.invoke(entity)
+                    }
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+            }
 
             // Title Field
             OutlinedTextField(

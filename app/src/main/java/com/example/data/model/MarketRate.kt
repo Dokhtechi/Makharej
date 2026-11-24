@@ -97,7 +97,7 @@ data class MarketRatesState(
         sourceLabel = "TGJU (tgju.org/coin)"
     ),
     val tether: MarketRateItem = MarketRateItem(
-        key = "asiya-usdt",
+        key = "nobitex-usdt",
         title = "تتر (USDT)",
         priceTomans = 0L,
         changePercent = 0.0,
@@ -105,7 +105,7 @@ data class MarketRatesState(
         isPositiveChange = true,
         timeFormatted = "",
         unitLabel = "تومان",
-        sourceLabel = "Asiya Exchange (asiyaexchange.com)"
+        sourceLabel = "Nobitex (nobitex.ir/price/gram)"
     ),
     val crudeOil: MarketRateItem = MarketRateItem(
         key = "oil_brent",
@@ -120,21 +120,22 @@ data class MarketRatesState(
         displayDiffFormatted = null,
         sourceLabel = "TGJU (tgju.org/coin)"
     ),
-    val bourse: MarketRateItem = MarketRateItem(
-        key = "bourse",
-        title = "شاخص کل بورس",
+    val gram: MarketRateItem = MarketRateItem(
+        key = "nobitex-gram",
+        title = "گرام (GRAM)",
         priceTomans = 0L,
         changePercent = 0.0,
         changeTomans = 0L,
         isPositiveChange = true,
         timeFormatted = "",
-        unitLabel = "واحد",
+        unitLabel = "دلار",
         displayPriceFormatted = null,
         displayDiffFormatted = null,
-        sourceLabel = "TGJU (tgju.org/coin)"
+        sourceLabel = "Nobitex (nobitex.ir/price/gram)"
     ),
     val lastUpdateTime: String = "",
     val isLoading: Boolean = false,
+    val isTetherRefreshing: Boolean = false,
     val isSuccess: Boolean = true,
     val errorMessage: String? = null
 )

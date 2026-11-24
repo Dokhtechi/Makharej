@@ -22,8 +22,8 @@ class MarketRatesService(private val context: Context) {
 
     /**
      * Fetches live market rates using strictly isolated per-source boundaries:
-     * - TGJU (Dollar, Euro, Sekeh Emami, Rob Sekeh, Gold Ounce, 18K Gold, Bitcoin, Bourse, Brent Oil)
-     * - Asiya Exchange (Tether USDT)
+     * - TGJU (Dollar, Euro, Sekeh Emami, Rob Sekeh, Gold Ounce, 18K Gold, Bitcoin, Brent Oil)
+     * - Nobitex (Tether USDT and GRAM from https://nobitex.ir/price/gram)
      * A network error, timeout, or layout change in either source is completely isolated
      * and gracefully falls back to the last cached rates without impacting the rest of the app.
      */
@@ -33,10 +33,10 @@ class MarketRatesService(private val context: Context) {
 
         var merged = TgjuExtractedRates()
         var tgjuSucceeded = false
-        var asiyaSucceeded = false
+        var nobitexSucceeded = false
 
         supervisorScope {
-            // 1. ایزوله‌سازی کامل منبع TGJU با سقف زمانی مستقل
+            // 1. ایزوله‌سازی کامل منبع TGJU با سقف زمانی مستقل (ارز، سکه تک‌فروشی، طلا، بیت‌کوین، نفت برنت)
             val tgjuResult = try {
                 withTimeoutOrNull(18_000L) {
                     fetchTgjuRatesIsolated(now = now, nonce = nonce)
@@ -47,20 +47,19 @@ class MarketRatesService(private val context: Context) {
                 null
             }
             if (tgjuResult != null && tgjuResult.hasAny()) {
-                merged = merged.mergeMissing(tgjuResult.copy(tether = null))
+                merged = merged.mergeMissing(tgjuResult.copy(tether = null, gram = null))
                 tgjuSucceeded = true
             }
 
-            // 2. ایزوله‌سازی کامل منبع Asiya Exchange با سقف زمانی مستقل (تتر فقط از asiyaexchange.com)
-            val prevAsiyaTetherPrice = prefs.getLong("asiya_v1_tether_price", 0L)
-            val referenceDollarTomans = merged.dollar?.priceTomans?.takeIf { it > 0L }
-                ?: prefs.getLong("tgju_v5_dollar_price", 0L)
-            val asiyaTether = try {
-                withTimeoutOrNull(16_000L) {
-                    AsiyaExchangeService.fetchTetherRate(
-                        context = context,
-                        previousCachedPriceTomans = prevAsiyaTetherPrice,
-                        referenceDollarTomans = referenceDollarTomans
+            // 2. ایزوله‌سازی کامل منبع Nobitex با سقف زمانی مستقل (تتر به تومان و رمزارز گرام به دلار از nobitex.ir/price/gram)
+            val prevNobitexTether = prefs.getLong("nobitex_v1_tether_price", 0L)
+            val prevNobitexGramUsd = prefs.getString("nobitex_v2_gram_usd_price_str", "")
+                ?.replace("$", "")?.replace(",", "")?.trim()?.toDoubleOrNull() ?: 0.0
+            val nobitexResult = try {
+                withTimeoutOrNull(15_000L) {
+                    NobitexMarketService.fetchTetherAndGram(
+                        previousTetherTomans = prevNobitexTether,
+                        previousGramUsd = prevNobitexGramUsd
                     )
                 }
             } catch (ce: CancellationException) {
@@ -68,33 +67,64 @@ class MarketRatesService(private val context: Context) {
             } catch (_: Throwable) {
                 null
             }
-            if (asiyaTether != null) {
-                merged = merged.copy(tether = asiyaTether)
-                asiyaSucceeded = true
+            if (nobitexResult != null && nobitexResult.hasAny()) {
+                merged = merged.copy(
+                    tether = nobitexResult.tether ?: merged.tether,
+                    gram = nobitexResult.gram ?: merged.gram
+                )
+                nobitexSucceeded = true
             }
         }
 
-        val fetchedAny = tgjuSucceeded || asiyaSucceeded || merged.hasAny()
+        val fetchedAny = tgjuSucceeded || nobitexSucceeded || merged.hasAny()
         if (fetchedAny) {
             saveAllTgjuRates(merged, System.currentTimeMillis())
         }
 
         val err = if (!fetchedAny) {
-            "خطا در دریافت نرخ‌ها از tgju.org و asiyaexchange.com (نمایش آخرین مقادیر ذخیره‌شده)"
+            "خطا در دریافت نرخ‌ها از tgju.org و nobitex.ir (نمایش آخرین مقادیر ذخیره‌شده)"
         } else {
             null
         }
         buildCurrentState(errorMessage = err)
     }
 
+    /**
+     * Dedicated independent refresh for Tether (USDT) ONLY from Nobitex (`nobitex.ir/price/gram`).
+     * Updates only Tether in cache without touching any other currency or triggering TGJU requests.
+     */
+    suspend fun fetchTetherOnly(): Pair<MarketRatesState, Boolean> = withContext(Dispatchers.IO) {
+        val prevNobitexTether = prefs.getLong("nobitex_v1_tether_price", 0L)
+        val freshTether = try {
+            withTimeoutOrNull(12_000L) {
+                NobitexMarketService.fetchTetherOnly(previousTetherTomans = prevNobitexTether)
+            }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (_: Throwable) {
+            null
+        }
+
+        if (freshTether != null) {
+            val shamsiUpdate = formatExactRefreshTimestamp(System.currentTimeMillis())
+            prefs.edit().apply {
+                saveItem(this, "nobitex_v1_tether", freshTether)
+                putString("tgju_v5_last_update", shamsiUpdate)
+                apply()
+            }
+            return@withContext buildCurrentState(errorMessage = null) to true
+        }
+        buildCurrentState(errorMessage = null) to false
+    }
+
     private fun fetchTgjuRatesIsolated(now: Long, nonce: String): TgjuExtractedRates {
         var merged = TgjuExtractedRates()
 
-        // اولویت اول: ویجت لحظه‌ای رسمی api.tgju.org (تک‌فروشی سکه امامی و ربع سکه) — بدون تتر
+        // اولویت اول: ویجت لحظه‌ای رسمی api.tgju.org (تک‌فروشی سکه امامی و ربع سکه) — تتر و گرام فقط از نوبیتکس
         val allWidgetKeys = listOf(
             "price_dollar_rl", "price_eur", "retail_sekee",
             "retail_rob", "ons", "geram18",
-            "crypto-bitcoin", "bourse", "oil_brent"
+            "crypto-bitcoin", "oil_brent"
         )
         runCatching {
             val widgetUrl = "https://api.tgju.org/v1/widget/tmp?keys=${allWidgetKeys.joinToString(",")}&_t=$now&_r=$nonce"
@@ -138,13 +168,13 @@ class MarketRatesService(private val context: Context) {
             }
         }
 
-        // اولویت چهارم: صفحات تکمیلی TGJU فقط برای دلار، یورو و بیت‌کوین
+        // اولویت چهارم: صفحات تکمیلی TGJU برای دلار، یورو و بیت‌کوین
         if (merged.euro == null || merged.dollar == null) {
             runCatching {
                 val html = downloadText("https://www.tgju.org/currency?_t=$now&_r=$nonce", TGJU_COIN_URL)
                 if (!html.isNullOrBlank()) {
                     val parsed = parseAllFromTgjuCoinHtml(html)
-                    merged = merged.mergeMissing(parsed.copy(tether = null))
+                    merged = merged.mergeMissing(parsed.copy(tether = null, gram = null))
                 }
             }
         }
@@ -153,7 +183,7 @@ class MarketRatesService(private val context: Context) {
                 val html = downloadText("https://www.tgju.org/crypto?_t=$now&_r=$nonce", TGJU_COIN_URL)
                 if (!html.isNullOrBlank()) {
                     val parsed = parseAllFromTgjuCoinHtml(html)
-                    merged = merged.mergeMissing(parsed.copy(tether = null))
+                    merged = merged.mergeMissing(parsed.copy(tether = null, gram = null))
                 }
             }
         }
@@ -169,7 +199,8 @@ class MarketRatesService(private val context: Context) {
         return prefs.getLong("tgju_v5_dollar_price", 0L) > 0L ||
             prefs.getLong("tgju_v6_retail_sekee_price", 0L) > 0L ||
             prefs.getLong("tgju_v5_gold18_price", 0L) > 0L ||
-            prefs.getLong("tgju_v5_bourse_price", 0L) > 0L
+            !prefs.getString("nobitex_v2_gram_usd_price_str", "").isNullOrBlank() ||
+            prefs.getLong("nobitex_v1_tether_price", 0L) > 0L
     }
 
     private fun saveItem(editor: android.content.SharedPreferences.Editor, prefix: String, item: MarketRateItem?) {
@@ -223,8 +254,8 @@ class MarketRatesService(private val context: Context) {
             saveItem(this, "tgju_v5_ons", rates.goldOunce)
             saveItem(this, "tgju_v5_gold18", rates.gold18k)
             saveItem(this, "tgju_v5_btc", rates.bitcoin)
-            saveItem(this, "asiya_v1_tether", rates.tether)
-            saveItem(this, "tgju_v5_bourse", rates.bourse)
+            saveItem(this, "nobitex_v1_tether", rates.tether)
+            saveItem(this, "nobitex_v2_gram_usd", rates.gram)
             saveItem(this, "tgju_v5_oil", rates.crudeOil)
             putString("tgju_v5_last_update", shamsiUpdate)
             apply()
@@ -243,16 +274,23 @@ class MarketRatesService(private val context: Context) {
             gold18k = loadItem("tgju_v5_gold18", "geram18", "طلای 18 عیار", "تومان"),
             bitcoin = loadItem("tgju_v5_btc", "crypto-bitcoin", "بیت‌کوین", "دلار"),
             tether = loadItem(
-                prefix = "asiya_v1_tether",
-                key = "asiya-usdt",
+                prefix = "nobitex_v1_tether",
+                key = "nobitex-usdt",
                 title = "تتر (USDT)",
                 unitLabel = "تومان",
-                sourceLabel = AsiyaExchangeService.SOURCE_LABEL
+                sourceLabel = NobitexMarketService.SOURCE_LABEL
             ),
-            bourse = loadItem("tgju_v5_bourse", "bourse", "شاخص کل بورس", "واحد"),
+            gram = loadItem(
+                prefix = "nobitex_v2_gram_usd",
+                key = "nobitex-gram",
+                title = "گرام (GRAM)",
+                unitLabel = "دلار",
+                sourceLabel = NobitexMarketService.SOURCE_LABEL
+            ),
             crudeOil = loadItem("tgju_v5_oil", "oil_brent", "نفت برنت", "دلار"),
             lastUpdateTime = lastUpdate,
             isLoading = false,
+            isTetherRefreshing = false,
             isSuccess = errorMessage == null,
             errorMessage = errorMessage
         )
@@ -291,21 +329,20 @@ class MarketRatesService(private val context: Context) {
         val gold18k: MarketRateItem? = null,
         val bitcoin: MarketRateItem? = null,
         val tether: MarketRateItem? = null,
-        val bourse: MarketRateItem? = null,
+        val gram: MarketRateItem? = null,
         val crudeOil: MarketRateItem? = null
     ) {
         fun hasAny(): Boolean =
             dollar != null || euro != null || sekehEmami != null || robSekeh != null ||
                 goldOunce != null || gold18k != null || bitcoin != null || tether != null ||
-                bourse != null || crudeOil != null
+                gram != null || crudeOil != null
 
         fun isTgjuAssetsComplete(): Boolean =
             dollar != null && euro != null && sekehEmami != null && robSekeh != null &&
-                goldOunce != null && gold18k != null && bitcoin != null &&
-                bourse != null && crudeOil != null
+                goldOunce != null && gold18k != null && bitcoin != null && crudeOil != null
 
         fun isComplete(): Boolean =
-            isTgjuAssetsComplete() && tether != null
+            isTgjuAssetsComplete() && tether != null && gram != null
 
         fun mergeMissing(other: TgjuExtractedRates): TgjuExtractedRates = TgjuExtractedRates(
             dollar = dollar ?: other.dollar,
@@ -316,7 +353,7 @@ class MarketRatesService(private val context: Context) {
             gold18k = gold18k ?: other.gold18k,
             bitcoin = bitcoin ?: other.bitcoin,
             tether = tether ?: other.tether,
-            bourse = bourse ?: other.bourse,
+            gram = gram ?: other.gram,
             crudeOil = crudeOil ?: other.crudeOil
         )
 
@@ -335,7 +372,7 @@ class MarketRatesService(private val context: Context) {
             if (gold18k == null) add("geram18")
             if (bitcoin == null) add("crypto-bitcoin")
             if (tether == null) add("crypto-tether-irr")
-            if (bourse == null) add("bourse")
+            if (gram == null) add("crypto-gram")
             if (crudeOil == null) add("oil_brent")
         }
     }
@@ -343,6 +380,7 @@ class MarketRatesService(private val context: Context) {
     private enum class TgjuValueMode {
         RIAL_TO_TOMAN,
         USD_DECIMAL,
+        USD_CRYPTO_PRECISE,
         USD_WHOLE,
         POINTS
     }
@@ -357,6 +395,7 @@ class MarketRatesService(private val context: Context) {
     companion object {
         const val TGJU_COIN_URL = "https://www.tgju.org/coin"
         const val TGJU_SOURCE_LABEL = "TGJU (tgju.org/coin)"
+        const val TGJU_GRAM_SOURCE_LABEL = "TGJU (tgju.org/profile/crypto-gram)"
 
         private val HTML_TAG_REGEX = Regex("<[^>]*>")
         private val PERCENT_REGEX = Regex("""\(?([+-]?\d+(?:\.\d+)?)\s*%\)?""")
@@ -385,11 +424,11 @@ class MarketRatesService(private val context: Context) {
             val gold18Obj = firstObj("geram18")
             val btcObj = firstObj("crypto-bitcoin", "crypto-bitcoin-usd", "bitcoin")
             val tetherObj = firstObj("crypto-tether-irr")
-            val bourseObj = firstObj("bourse", "bourse_total", "tse")
+            val gramObj = firstObj("crypto-gram", "crypto-gram-usd", "gram", "crypto-toncoin")
             val oilObj = firstObj("oil_brent", "oil")
 
             val timestamp = listOfNotNull(
-                dollarObj, sekeeObj, gold18Obj, bourseObj, oilObj, onsObj, euroObj
+                dollarObj, sekeeObj, gold18Obj, gramObj, oilObj, onsObj, euroObj
             ).firstNotNullOfOrNull { it.optString("ts", "").takeIf { s -> s.isNotBlank() } } ?: ""
 
             val rates = TgjuExtractedRates(
@@ -401,7 +440,7 @@ class MarketRatesService(private val context: Context) {
                 gold18k = gold18Obj?.let { buildItemFromJson(it, "geram18", "طلای 18 عیار", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 100_000.0) },
                 bitcoin = btcObj?.let { buildItemFromJson(it, "crypto-bitcoin", "بیت‌کوین", TgjuValueMode.USD_WHOLE, minPrice = 1_000.0) },
                 tether = tetherObj?.let { buildItemFromJson(it, "crypto-tether-irr", "تتر (USDT)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0) },
-                bourse = bourseObj?.let { buildItemFromJson(it, "bourse", "شاخص کل بورس", TgjuValueMode.POINTS, minPrice = 10_000.0) },
+                gram = gramObj?.let { buildItemFromJson(it, "crypto-gram", "گرام (GRAM)", TgjuValueMode.USD_CRYPTO_PRECISE, minPrice = 0.000001) },
                 crudeOil = oilObj?.let { buildItemFromJson(it, "oil_brent", "نفت برنت", TgjuValueMode.USD_DECIMAL, minPrice = 10.0) }
             )
             return Pair(rates, timestamp)
@@ -424,7 +463,7 @@ class MarketRatesService(private val context: Context) {
             var gold18: MarketRateItem? = null
             var btc: MarketRateItem? = null
             var tether: MarketRateItem? = null
-            var bourse: MarketRateItem? = null
+            var gram: MarketRateItem? = null
             var oil: MarketRateItem? = null
             var timestamp = ""
 
@@ -459,8 +498,8 @@ class MarketRatesService(private val context: Context) {
                     "crypto-tether-irr" -> if (tether == null) {
                         tether = buildItemFromJson(obj, "crypto-tether-irr", "تتر (USDT)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0)
                     }
-                    "bourse", "bourse_total", "tse" -> if (bourse == null) {
-                        bourse = buildItemFromJson(obj, "bourse", "شاخص کل بورس", TgjuValueMode.POINTS, minPrice = 10_000.0)
+                    "crypto-gram", "crypto-gram-usd", "gram", "crypto-toncoin" -> if (gram == null || name == "crypto-gram") {
+                        buildItemFromJson(obj, "crypto-gram", "گرام (GRAM)", TgjuValueMode.USD_CRYPTO_PRECISE, minPrice = 0.000001)?.let { gram = it }
                     }
                     "oil_brent", "oil" -> if (oil == null || name == "oil_brent") {
                         buildItemFromJson(obj, "oil_brent", "نفت برنت", TgjuValueMode.USD_DECIMAL, minPrice = 10.0)?.let { oil = it }
@@ -478,7 +517,7 @@ class MarketRatesService(private val context: Context) {
                     gold18k = gold18,
                     bitcoin = btc,
                     tether = tether,
-                    bourse = bourse,
+                    gram = gram,
                     crudeOil = oil
                 ),
                 timestamp
@@ -549,10 +588,19 @@ class MarketRatesService(private val context: Context) {
                 listOf("id=\"l-crypto-tether-irr\"", "data-market-row=\"crypto-tether-irr\"", "l-crypto-tether-irr")
             )?.let { buildItemFromRaw(it, "crypto-tether-irr", "تتر (USDT)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0) }
 
-            val bourse = extractRowFromTgjuHtml(
+            val gram = extractRowFromTgjuHtml(
                 html,
-                listOf("id=\"l-bourse\"", "data-market-row=\"bourse\"", "l-bourse", "شاخص بورس")
-            )?.let { buildItemFromRaw(it, "bourse", "شاخص کل بورس", TgjuValueMode.POINTS, minPrice = 10_000.0) }
+                listOf(
+                    "data-market-row=\"crypto-gram\"",
+                    "data-market-nameslug=\"crypto-gram\"",
+                    "id=\"l-crypto-gram\"",
+                    "profile/crypto-gram",
+                    "l-crypto-gram",
+                    "data-market-row=\"crypto-toncoin\"",
+                    "id=\"l-crypto-toncoin\"",
+                    "profile/crypto-toncoin"
+                )
+            )?.let { buildItemFromRaw(it, "crypto-gram", "گرام (GRAM)", TgjuValueMode.USD_CRYPTO_PRECISE, minPrice = 0.000001) }
 
             val oil = extractRowFromTgjuHtml(
                 html,
@@ -572,17 +620,72 @@ class MarketRatesService(private val context: Context) {
                 gold18k = gold18,
                 bitcoin = btc,
                 tether = tether,
-                bourse = bourse,
+                gram = gram,
                 crudeOil = oil
             )
         }
 
         /**
-         * Backwards-compatible helper used by existing unit tests.
+         * Extracts live GRAM price directly from TGJU's profile page HTML (`tgju.org/profile/crypto-gram`).
          */
-        fun parseBourseAndOilFromTgjuCoinHtml(html: String): Pair<MarketRateItem?, MarketRateItem?> {
+        fun parseGramFromProfileHtml(html: String): MarketRateItem? {
+            extractRowFromTgjuHtml(
+                html,
+                listOf(
+                    "data-market-row=\"crypto-gram\"",
+                    "id=\"l-crypto-gram\"",
+                    "profile/crypto-gram",
+                    "data-market-row=\"crypto-toncoin\"",
+                    "id=\"l-crypto-toncoin\""
+                )
+            )?.let {
+                return buildItemFromRaw(it, "crypto-gram", "گرام (GRAM)", TgjuValueMode.USD_CRYPTO_PRECISE, minPrice = 0.000001)
+            }
+
+            val priceMatch = Regex(
+                """data-col\s*=\s*["']info\.last_trade\.PDrCotVal["'][^>]*>\s*([^<]+)<""",
+                RegexOption.IGNORE_CASE
+            ).find(html) ?: Regex(
+                """class\s*=\s*["'][^"']*\binfo-price\b[^"']*["'][^>]*>\s*([^<]+)<""",
+                RegexOption.IGNORE_CASE
+            ).find(html)
+
+            val priceVal = parseCleanDouble(priceMatch?.groupValues?.get(1)) ?: return null
+            if (priceVal <= 0.0) return null
+
+            val diffMatch = Regex(
+                """data-col\s*=\s*["']info\.last_trade\.PDrCotVal_diff["'][^>]*>\s*([^<]+)<""",
+                RegexOption.IGNORE_CASE
+            ).find(html)
+            val pctMatch = Regex(
+                """data-col\s*=\s*["']info\.last_trade\.PDrCotVal_percent["'][^>]*>\s*([^<]+)<""",
+                RegexOption.IGNORE_CASE
+            ).find(html)
+            val diffVal = parseCleanDouble(diffMatch?.groupValues?.get(1)) ?: 0.0
+            val pctVal = parseCleanDouble(pctMatch?.groupValues?.get(1)) ?: 0.0
+            val isNeg = Regex("""data-col\s*=\s*["']info\.last_trade\.PDrCotVal["'][^>]*class\s*=\s*["'][^"']*\blow\b""", RegexOption.IGNORE_CASE)
+                .containsMatchIn(html) || diffVal < 0.0 || pctVal < 0.0
+
+            return buildItemFromRaw(
+                raw = TgjuRawRow(
+                    price = priceVal,
+                    changeAmount = abs(diffVal),
+                    changePercent = abs(pctVal),
+                    isPositive = !isNeg
+                ),
+                key = "crypto-gram",
+                title = "گرام (GRAM)",
+                mode = TgjuValueMode.USD_CRYPTO_PRECISE,
+                minPrice = 0.000001
+            )
+        }
+
+        /**
+         * Helper used by unit tests to verify GRAM and Brent Oil extraction from TGJU HTML.
+         */
+        fun parseGramAndOilFromTgjuCoinHtml(html: String): Pair<MarketRateItem?, MarketRateItem?> {
             val all = parseAllFromTgjuCoinHtml(html)
-            return Pair(all.bourse, all.crudeOil)
+            return Pair(all.gram, all.crudeOil)
         }
 
         private fun buildItemFromJson(
@@ -683,6 +786,24 @@ class MarketRatesService(private val context: Context) {
                     )
                 }
 
+                TgjuValueMode.USD_CRYPTO_PRECISE -> {
+                    val priceStr = formatAdaptiveUsdAmount(raw.price)
+                    val diffStr = if (absD > 0.0) formatAdaptiveUsdAmount(absD) else null
+                    MarketRateItem(
+                        key = key,
+                        title = title,
+                        priceTomans = raw.price.roundToLong(),
+                        changePercent = absDp,
+                        changeTomans = absD.roundToLong(),
+                        isPositiveChange = raw.isPositive,
+                        timeFormatted = timeFormatted,
+                        unitLabel = "دلار",
+                        displayPriceFormatted = priceStr,
+                        displayDiffFormatted = diffStr,
+                        sourceLabel = TGJU_GRAM_SOURCE_LABEL
+                    )
+                }
+
                 TgjuValueMode.USD_WHOLE -> {
                     val priceLong = raw.price.roundToLong()
                     val diffLong = absD.roundToLong()
@@ -720,6 +841,17 @@ class MarketRatesService(private val context: Context) {
                         sourceLabel = TGJU_SOURCE_LABEL
                     )
                 }
+            }
+        }
+
+        fun formatAdaptiveUsdAmount(value: Double): String {
+            val absVal = abs(value)
+            return when {
+                absVal >= 1.0 -> "$" + String.format(Locale.US, "%,.2f", absVal)
+                absVal >= 0.01 -> "$" + String.format(Locale.US, "%.4f", absVal)
+                absVal >= 0.0001 -> "$" + String.format(Locale.US, "%.6f", absVal).trimEnd('0').trimEnd('.')
+                absVal > 0.0 -> "$" + String.format(Locale.US, "%.8f", absVal).trimEnd('0').trimEnd('.')
+                else -> "$0.00"
             }
         }
 

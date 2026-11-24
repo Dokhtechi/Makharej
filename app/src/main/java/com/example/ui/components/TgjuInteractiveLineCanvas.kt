@@ -72,7 +72,7 @@ internal fun InteractiveTgjuLineCanvas(
     val maxPrice = remember(points) { points.maxOf { it.price } }
     val paddedMin = if (maxPrice == minPrice) minPrice * 0.98 else minPrice - (maxPrice - minPrice) * 0.08
     val paddedMax = if (maxPrice == minPrice) maxPrice * 1.02 else maxPrice + (maxPrice - minPrice) * 0.08
-    val priceSpan = (paddedMax - paddedMin).coerceAtLeast(1e-6)
+    val priceSpan = (paddedMax - paddedMin).coerceAtLeast(1e-9)
 
     val gridLineColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
     val labelTextColor = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant)
@@ -392,9 +392,20 @@ internal fun formatXAxisTickLabel(
     }
 }
 
+internal fun formatAdaptiveUsd(price: Double): String {
+    val absVal = abs(price)
+    return when {
+        absVal >= 1.0 -> "$" + String.format(Locale.US, "%,.2f", price)
+        absVal >= 0.01 -> "$" + String.format(Locale.US, "%.4f", price)
+        absVal >= 0.0001 -> "$" + String.format(Locale.US, "%.6f", price).trimEnd('0').trimEnd('.')
+        absVal > 0.0 -> "$" + String.format(Locale.US, "%.8f", price).trimEnd('0').trimEnd('.')
+        else -> "$0.00"
+    }
+}
+
 internal fun formatChartPrice(price: Double, asset: TgjuChartAsset): String {
     return when {
-        asset.isUsdCurrency && asset.showDecimals -> "$" + String.format(Locale.US, "%,.2f", price)
+        asset.isUsdCurrency && asset.showDecimals -> formatAdaptiveUsd(price)
         asset.isUsdCurrency -> "$" + String.format(Locale.US, "%,.0f", price)
         else -> PersianDateHelper.formatCurrency(price.roundToLong(), includeUnit = false)
     }
@@ -411,6 +422,9 @@ internal fun formatCrosshairTopPrice(price: Double, asset: TgjuChartAsset): Stri
 
 internal fun formatCompactYPrice(price: Double, asset: TgjuChartAsset): String {
     return when {
+        asset.isUsdCurrency && asset.showDecimals && price < 1.0 && price >= 0.01 -> "$" + String.format(Locale.US, "%.4f", price)
+        asset.isUsdCurrency && asset.showDecimals && price < 0.01 && price > 0.0 -> "$" + String.format(Locale.US, "%.5f", price)
+        asset.isUsdCurrency && asset.showDecimals && price < 10.0 -> "$" + String.format(Locale.US, "%.2f", price)
         asset.isUsdCurrency && asset.showDecimals && price < 500.0 -> "$" + String.format(Locale.US, "%.1f", price)
         asset.isUsdCurrency && price >= 10_000.0 -> "$" + String.format(Locale.US, "%.0fK", price / 1_000.0)
         asset.isUsdCurrency -> "$" + String.format(Locale.US, "%,.0f", price)

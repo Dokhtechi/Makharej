@@ -75,6 +75,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -93,6 +94,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.network.TgjuChartAsset
 import com.example.data.network.TgjuChartRange
 import com.example.data.network.TgjuDateSearchResult
+import com.example.data.network.TgjuFifteenYearExtremes
 import com.example.data.network.TgjuHistoryPoint
 import com.example.data.network.TgjuHistoryService
 import com.example.data.network.TgjuHistorySource
@@ -213,8 +215,8 @@ fun TgjuHistoricalChartDialog(
                         searchMonth = latest.shamsiMonth
                         searchDay = latest.shamsiDay
                     }
-                } else if (activeSearchedDate == null) {
-                    // Keep full view up to the newly appended latest day if user wasn't inspecting a searched historical date
+                } else if (activeSearchedDate == null && selectedPointIdx == null) {
+                    // Keep full view up to the newly appended latest day if user wasn't inspecting a searched/selected historical date
                     visibleStartIdx = 0
                     visibleEndIdx = (updatedRangePts.size - 1).coerceAtLeast(0)
                 }
@@ -241,6 +243,10 @@ fun TgjuHistoricalChartDialog(
 
     val rangePoints = remember(allPoints, selectedRange) {
         TgjuHistoryService.filterPointsForRange(allPoints, selectedRange)
+    }
+
+    val rangeExtremes = remember(rangePoints) {
+        TgjuHistoryService.findRangeExtremes(rangePoints)
     }
 
     val displayedPoints = remember(rangePoints, visibleStartIdx, visibleEndIdx) {
@@ -283,7 +289,58 @@ fun TgjuHistoricalChartDialog(
     }
 
     /**
-     * Immediately searches the 10-year archive and SYNCHRONOUSLY snaps the chart window and
+     * Synchronously focuses the chart window and snaps the vertical crosshair line & price callout
+     * directly onto the exact given historical point on the very same frame.
+     */
+    fun focusPointOnChart(
+        targetPoint: TgjuHistoryPoint,
+        banner: TgjuDateSearchResult? = null,
+        syncDatePickers: Boolean = false
+    ) {
+        if (allPoints.isEmpty()) return
+
+        var targetRange = TgjuHistoryService.bestRangeForPoint(allPoints, targetPoint)
+        var targetRangePts = TgjuHistoryService.filterPointsForRange(allPoints, targetRange)
+        var foundIdx = targetRangePts.indexOfFirst { it.shamsiDate == targetPoint.shamsiDate }
+        if (foundIdx < 0 && targetRange != TgjuChartRange.FROM_1390) {
+            targetRange = TgjuChartRange.FROM_1390
+            targetRangePts = TgjuHistoryService.filterPointsForRange(allPoints, targetRange)
+            foundIdx = targetRangePts.indexOfFirst { it.shamsiDate == targetPoint.shamsiDate }
+        }
+        val safeFoundIdx = if (foundIdx >= 0) foundIdx else targetRangePts.lastIndex.coerceAtLeast(0)
+
+        val (startIdx, endIdx, localSelIdx) = if (targetRangePts.size > 40) {
+            // Focus a crisp ±14-day window centered right around the target date
+            val halfWindow = 14
+            var start = (safeFoundIdx - halfWindow).coerceAtLeast(0)
+            var end = (safeFoundIdx + halfWindow).coerceAtMost(targetRangePts.lastIndex)
+            val desiredSize = halfWindow * 2 + 1
+            if (end - start + 1 < desiredSize) {
+                if (start == 0) {
+                    end = (desiredSize - 1).coerceAtMost(targetRangePts.lastIndex)
+                } else if (end == targetRangePts.lastIndex) {
+                    start = (targetRangePts.lastIndex - desiredSize + 1).coerceAtLeast(0)
+                }
+            }
+            Triple(start, end, (safeFoundIdx - start).coerceIn(0, (end - start).coerceAtLeast(0)))
+        } else {
+            Triple(0, targetRangePts.lastIndex.coerceAtLeast(0), safeFoundIdx)
+        }
+
+        if (syncDatePickers) {
+            searchYear = targetPoint.shamsiYear
+            searchMonth = targetPoint.shamsiMonth
+            searchDay = targetPoint.shamsiDay
+        }
+        searchResultBanner = banner
+        selectedRange = targetRange
+        visibleStartIdx = startIdx
+        visibleEndIdx = endIdx
+        selectedPointIdx = localSelIdx
+    }
+
+    /**
+     * Immediately searches the archive and SYNCHRONOUSLY snaps the chart window and
      * vertical crosshair line directly onto the found date on the very same frame!
      */
     fun executeHistoricalDateSearch() {
@@ -294,35 +351,27 @@ fun TgjuHistoricalChartDialog(
             month = searchMonth,
             day = searchDay
         ) ?: return
+        focusPointOnChart(targetPoint = result.point, banner = result, syncDatePickers = false)
+    }
 
-        val targetRange = TgjuHistoryService.bestRangeForPoint(allPoints, result.point)
-        val targetRangePts = TgjuHistoryService.filterPointsForRange(allPoints, targetRange)
-        val foundIdx = targetRangePts.indexOfFirst { it.shamsiDate == result.point.shamsiDate }
-            .let { if (it >= 0) it else targetRangePts.lastIndex.coerceAtLeast(0) }
-
-        val (startIdx, endIdx, localSelIdx) = if (targetRangePts.size > 40) {
-            // Focus a crisp ±14-day window centered right around the searched date
-            val halfWindow = 14
-            var start = (foundIdx - halfWindow).coerceAtLeast(0)
-            var end = (foundIdx + halfWindow).coerceAtMost(targetRangePts.lastIndex)
-            val desiredSize = halfWindow * 2 + 1
-            if (end - start + 1 < desiredSize) {
-                if (start == 0) {
-                    end = (desiredSize - 1).coerceAtMost(targetRangePts.lastIndex)
-                } else if (end == targetRangePts.lastIndex) {
-                    start = (targetRangePts.lastIndex - desiredSize + 1).coerceAtLeast(0)
-                }
-            }
-            Triple(start, end, (foundIdx - start).coerceIn(0, (end - start).coerceAtLeast(0)))
-        } else {
-            Triple(0, targetRangePts.lastIndex.coerceAtLeast(0), foundIdx)
+    /**
+     * Snaps the vertical crosshair directly onto the exact highest or lowest point inside the
+     * currently selected timeframe WITHOUT switching away from `selectedRange`.
+     */
+    fun focusPointInCurrentRange(targetPoint: TgjuHistoryPoint) {
+        if (rangePoints.isEmpty()) return
+        val foundIdx = rangePoints.indexOfFirst { it.shamsiDate == targetPoint.shamsiDate }
+        if (foundIdx < 0) {
+            focusPointOnChart(targetPoint = targetPoint, banner = null, syncDatePickers = true)
+            return
         }
-
-        searchResultBanner = result
-        selectedRange = targetRange
-        visibleStartIdx = startIdx
-        visibleEndIdx = endIdx
-        selectedPointIdx = localSelIdx
+        searchYear = targetPoint.shamsiYear
+        searchMonth = targetPoint.shamsiMonth
+        searchDay = targetPoint.shamsiDay
+        searchResultBanner = null
+        visibleStartIdx = 0
+        visibleEndIdx = rangePoints.lastIndex
+        selectedPointIdx = foundIdx
     }
 
     fun zoomInWindow() {
@@ -391,7 +440,8 @@ fun TgjuHistoricalChartDialog(
         selectedPointIdx = (nextGlobal - newStart).coerceIn(0, (newEnd - newStart).coerceAtLeast(0))
     }
 
-    val cacheStatusSubtitle = remember(dataSource, allPoints.size, newlyAddedDays, isSyncingInBackground) {
+    val sourceDomainName = if (asset == TgjuChartAsset.GRAM) "nobitex.ir" else "tgju.org"
+    val cacheStatusSubtitle = remember(dataSource, allPoints.size, newlyAddedDays, isSyncingInBackground, sourceDomainName) {
         when {
             isSyncingInBackground && allPoints.isNotEmpty() ->
                 "در حال همگام‌سازی روزهای جدید (کش از ۱۳۹۰: ${allPoints.size} روز)..."
@@ -402,9 +452,9 @@ fun TgjuHistoricalChartDialog(
             dataSource == TgjuHistorySource.INCREMENTAL_UPDATE ->
                 "به‌روز است (دیتای گذشته از کش گوشی • ${allPoints.size} روز)"
             allPoints.isNotEmpty() ->
-                "ذخیره آفلاین از سال ۱۳۹۰ در کش گوشی (${allPoints.size} روز) • tgju.org"
+                "ذخیره آفلاین از سال ۱۳۹۰ در کش گوشی (${allPoints.size} روز) • $sourceDomainName"
             else ->
-                "منبع: tgju.org  •  آرشیو از سال 1390"
+                "منبع: $sourceDomainName  •  آرشیو از سال 1390"
         }
     }
 
@@ -567,36 +617,83 @@ fun TgjuHistoricalChartDialog(
                         )
                     }
 
-                    // 5 Timeframe Selector Chips (۱ هفته، ۱ ماه، ۶ ماه، ۱ سال، ۱۰ سال)
-                    Row(
+                    // 8 Timeframe Selector Chips in a symmetric 4x2 grid with vibrant, cheerful jewel-tone colors
+                    val isDarkTheme = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+                    val topRanges = remember {
+                        listOf(
+                            TgjuChartRange.WEEK_1,
+                            TgjuChartRange.MONTH_1,
+                            TgjuChartRange.MONTH_6,
+                            TgjuChartRange.YEAR_1
+                        )
+                    }
+                    val bottomRanges = remember {
+                        listOf(
+                            TgjuChartRange.YEAR_3,
+                            TgjuChartRange.YEAR_5,
+                            TgjuChartRange.YEAR_10,
+                            TgjuChartRange.FROM_1390
+                        )
+                    }
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        TgjuChartRange.entries.forEach { range ->
-                            val isSelected = range == selectedRange
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) accentColor else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (isSelected) accentColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { selectTimeRange(range) }
-                                    .testTag("tgju_chart_range_${range.name}")
+                        listOf(topRanges, bottomRanges).forEach { rowRanges ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
-                                Text(
-                                    text = enDigits(range.labelFa),
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
-                                    color = if (isSelected) Color.White else appTextColor(MaterialTheme.colorScheme.onSurface),
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    modifier = Modifier.padding(vertical = 7.dp, horizontal = 2.dp)
-                                )
+                                rowRanges.forEach { range ->
+                                    val isSelected = range == selectedRange
+                                    val (chipAccent, chipDarkText) = when (range) {
+                                        TgjuChartRange.WEEK_1 -> Color(0xFF10B981) to Color(0xFF065F46)     // Radiant Emerald
+                                        TgjuChartRange.MONTH_1 -> Color(0xFF0EA5E9) to Color(0xFF0369A1)    // Luminous Sky Blue
+                                        TgjuChartRange.MONTH_6 -> Color(0xFF6366F1) to Color(0xFF3730A3)    // Vivid Indigo
+                                        TgjuChartRange.YEAR_1 -> Color(0xFFF59E0B) to Color(0xFF92400E)     // Cheerful Amber Gold
+                                        TgjuChartRange.YEAR_3 -> Color(0xFFF43F5E) to Color(0xFF9F1239)     // Vibrant Coral Rose
+                                        TgjuChartRange.YEAR_5 -> Color(0xFFA855F7) to Color(0xFF6B21A8)     // Bright Orchid Purple
+                                        TgjuChartRange.YEAR_10 -> Color(0xFFF97316) to Color(0xFF9A3412)    // Energetic Sunset Orange
+                                        TgjuChartRange.FROM_1390 -> Color(0xFF14B8A6) to Color(0xFF115E59)  // Sparkling Ocean Teal
+                                    }
+                                    val unselectedBg = chipAccent.copy(alpha = if (isDarkTheme) 0.22f else 0.14f)
+                                    val chipBorderColor = if (isSelected) {
+                                        chipAccent
+                                    } else {
+                                        chipAccent.copy(alpha = if (isDarkTheme) 0.72f else 0.62f)
+                                    }
+                                    val chipTextColor = when {
+                                        isSelected -> Color.White
+                                        isDarkTheme -> Color.White
+                                        else -> chipDarkText
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(11.dp),
+                                        color = if (isSelected) chipAccent else unselectedBg,
+                                        shadowElevation = if (isSelected) 4.dp else 0.dp,
+                                        border = BorderStroke(
+                                            width = if (isSelected) 1.6.dp else 1.2.dp,
+                                            color = chipBorderColor
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(11.dp))
+                                            .clickable { selectTimeRange(range) }
+                                            .testTag("tgju_chart_range_${range.name}")
+                                    ) {
+                                        Text(
+                                            text = enDigits(range.labelFa),
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.ExtraBold,
+                                            color = chipTextColor,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            modifier = Modifier.padding(vertical = 7.5.dp, horizontal = 3.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -792,6 +889,22 @@ fun TgjuHistoricalChartDialog(
                                 }
                             }
                         }
+                    }
+
+                    // Single-line interactive Highest & Lowest price strip for the currently selected timeframe
+                    if (rangeExtremes != null && !isLoading) {
+                        RangeExtremesRow(
+                            extremes = rangeExtremes,
+                            rangeLabelFa = selectedRange.labelFa,
+                            asset = asset,
+                            selectedDateStr = if (selectedPointIdx != null) activePoint?.shamsiDate else null,
+                            onHighestClick = {
+                                focusPointInCurrentRange(rangeExtremes.highestPoint)
+                            },
+                            onLowestClick = {
+                                focusPointInCurrentRange(rangeExtremes.lowestPoint)
+                            }
+                        )
                     }
 
                     // Main Interactive Line Chart Area (with top crosshair price callout pill!)
@@ -1016,4 +1129,161 @@ fun TgjuHistoricalChartDialog(
         }
     }
 }
+
+@Composable
+private fun RangeExtremesRow(
+    extremes: TgjuFifteenYearExtremes,
+    rangeLabelFa: String,
+    asset: TgjuChartAsset,
+    selectedDateStr: String?,
+    onHighestClick: () -> Unit,
+    onLowestClick: () -> Unit
+) {
+    val isHighestFocused = selectedDateStr != null && selectedDateStr == extremes.highestPoint.shamsiDate
+    val isLowestFocused = selectedDateStr != null && selectedDateStr == extremes.lowestPoint.shamsiDate
+    val highColor = Color(0xFF059669)
+    val lowColor = Color(0xFFDC2626)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("tgju_chart_range_extremes_row"),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ExtremePriceChip(
+            label = "بیشترین $rangeLabelFa",
+            point = extremes.highestPoint,
+            asset = asset,
+            tintColor = highColor,
+            isFocused = isHighestFocused,
+            isHigh = true,
+            testTagName = "tgju_chart_range_highest_button",
+            onClick = onHighestClick,
+            modifier = Modifier.weight(1f)
+        )
+        ExtremePriceChip(
+            label = "کمترین $rangeLabelFa",
+            point = extremes.lowestPoint,
+            asset = asset,
+            tintColor = lowColor,
+            isFocused = isLowestFocused,
+            isHigh = false,
+            testTagName = "tgju_chart_range_lowest_button",
+            onClick = onLowestClick,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun ExtremePriceChip(
+    label: String,
+    point: TgjuHistoryPoint,
+    asset: TgjuChartAsset,
+    tintColor: Color,
+    isFocused: Boolean,
+    isHigh: Boolean,
+    testTagName: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val priceFormatted = formatChartPrice(point.price, asset)
+    val dateFormatted = PersianDateHelper.toEnglishDigits(point.shamsiDate)
+
+    Surface(
+        shape = RoundedCornerShape(11.dp),
+        color = tintColor.copy(alpha = if (isFocused) 0.18f else 0.08f),
+        border = BorderStroke(
+            width = if (isFocused) 1.6.dp else 1.dp,
+            color = tintColor.copy(alpha = if (isFocused) 0.95f else 0.38f)
+        ),
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .clickable(onClick = onClick)
+            .testTag(testTagName)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
+                    Icon(
+                        imageVector = if (isHigh) {
+                            Icons.AutoMirrored.Filled.TrendingUp
+                        } else {
+                            Icons.AutoMirrored.Filled.TrendingDown
+                        },
+                        contentDescription = label,
+                        tint = tintColor,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Text(
+                        text = enDigits(label),
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Black,
+                        color = tintColor,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Text(
+                        text = dateFormatted,
+                        fontFamily = OutfitFontFamily,
+                        fontSize = 8.8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Text(
+                        text = priceFormatted,
+                        fontFamily = OutfitFontFamily,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Black,
+                        color = appTextColor(MaterialTheme.colorScheme.onSurface),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                }
+                if (!asset.isUsdCurrency) {
+                    Text(
+                        text = asset.unitFa,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+        }
+    }
+}
+
 

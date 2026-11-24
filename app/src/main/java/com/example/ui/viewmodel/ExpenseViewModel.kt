@@ -245,6 +245,22 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun refreshTetherRateOnly(onComplete: ((Boolean) -> Unit)? = null) {
+        viewModelScope.launch(externalServiceExceptionHandler) {
+            if (_marketRates.value.isTetherRefreshing) return@launch
+            _marketRates.value = _marketRates.value.copy(isTetherRefreshing = true)
+            val (updated, ok) = try {
+                marketRatesService.fetchTetherOnly()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Throwable) {
+                marketRatesService.getCachedOrDefault() to false
+            }
+            _marketRates.value = updated.copy(isTetherRefreshing = false)
+            onComplete?.invoke(ok)
+        }
+    }
+
     init {
         val database = AppDatabase.getDatabase(application)
         repository = ExpenseRepository(database.expenseDao(), database.folderDao())

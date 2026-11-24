@@ -31,7 +31,8 @@ object BackupRestoreHelper {
         "app_font_scale_prefs",
         "installment_reminders_prefs",
         "expense_suggestions_prefs",
-        "github_update_prefs"
+        "github_update_prefs",
+        "sticky_notes_prefs"
     )
 
     private val moshiAnyAdapter = Moshi.Builder().build().adapter(Any::class.java).lenient()

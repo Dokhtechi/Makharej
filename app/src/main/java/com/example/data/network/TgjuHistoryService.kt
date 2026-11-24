@@ -110,17 +110,17 @@ enum class TgjuChartAsset(
         minPlausiblePrice = 1.0,
         maxPlausiblePrice = 500_000.0
     ),
-    BOURSE(
-        symbol = "bourse",
-        fallbackSymbols = listOf("index_overall"),
-        titleFa = "شاخص بورس",
-        unitFa = "واحد",
+    GRAM(
+        symbol = "nobitex-gram-usdt",
+        fallbackSymbols = listOf("GRAMUSDT", "1000GRAMUSDT"),
+        titleFa = "رمزارز گرام (GRAM)",
+        unitFa = "دلار",
         isRialToToman = false,
-        isUsdCurrency = false,
-        showDecimals = false,
-        accentHex = 0xFF2563EB,
-        minPlausiblePrice = 10_000.0,
-        maxPlausiblePrice = 50_000_000.0
+        isUsdCurrency = true,
+        showDecimals = true,
+        accentHex = 0xFF0284C7,
+        minPlausiblePrice = 0.000001,
+        maxPlausiblePrice = 100_000.0
     ),
     BRENT_OIL(
         symbol = "oil_brent",
@@ -144,6 +144,9 @@ enum class TgjuChartRange(
     MONTH_1("۱ ماه", 30),
     MONTH_6("۶ ماه", 180),
     YEAR_1("۱ سال", 365),
+    YEAR_3("۳ سال", 365 * 3 + 1),
+    YEAR_5("۵ سال", 365 * 5 + 1),
+    YEAR_10("۱۰ سال", 365 * 10 + 2),
     FROM_1390("از ۱۳۹۰", 0)
 }
 
@@ -167,6 +170,11 @@ enum class TgjuHistorySource {
     DISK_CACHE_FRESH,       // Served instantaneously from persistent device cache (already fresh)
     DISK_CACHE_OFFLINE      // Offline fallback: served directly from persistent since-1390 device cache
 }
+
+data class TgjuFifteenYearExtremes(
+    val highestPoint: TgjuHistoryPoint,
+    val lowestPoint: TgjuHistoryPoint
+)
 
 data class TgjuHistoryLoadResult(
     val points: List<TgjuHistoryPoint>,
@@ -385,6 +393,12 @@ object TgjuHistoryService {
         deltaLength: Int,
         nowMs: Long
     ): List<TgjuHistoryPoint> {
+        if (asset == TgjuChartAsset.GRAM) {
+            return fetchNobitexHistoryWindow(
+                fromSec = ((nowMs - (deltaLength.toLong() * ONE_DAY_MS)) / 1000L).coerceAtLeast(START_1390_EPOCH_MS / 1000L),
+                toSec = nowMs / 1000L + 86400L
+            )
+        }
         val symbolsToTry = listOf(asset.symbol) + asset.fallbackSymbols
         for (sym in symbolsToTry) {
             try {
@@ -401,14 +415,16 @@ object TgjuHistoryService {
     }
 
     /**
-     * One-time deep historical extraction from TGJU all the way back to Shamsi year 1390 (1390/01/01).
-     * Requests up to 6,000 rows on page 1 and automatically paginates if TGJU caps per-page rows
-     * until reaching 1390/01/01 or exhausting the symbol's available archive.
+     * One-time deep historical extraction from TGJU (or Nobitex UDF for GRAM) back to Shamsi year 1390.
+     * Requests up to 6,000 rows on page 1 and automatically paginates if capped per page.
      */
     private fun fetchFullHistoryFrom1390FromNetwork(
         asset: TgjuChartAsset,
         nowMs: Long
     ): List<TgjuHistoryPoint> {
+        if (asset == TgjuChartAsset.GRAM) {
+            return fetchFullNobitexGramHistoryFrom1390(nowMs)
+        }
         val symbolsToTry = listOf(asset.symbol) + asset.fallbackSymbols
         val targetOldestMs = START_1390_EPOCH_MS
         var bestPoints: List<TgjuHistoryPoint> = emptyList()
@@ -492,6 +508,127 @@ object TgjuHistoryService {
         }
 
         return bestPoints
+    }
+
+    private fun fetchFullNobitexGramHistoryFrom1390(nowMs: Long): List<TgjuHistoryPoint> {
+        val start1390Sec = START_1390_EPOCH_MS / 1000L
+        val chunkDaysSec = 450L * 86_400L
+        val collected = LinkedHashMap<String, TgjuHistoryPoint>()
+        var windowTo = (nowMs / 1000L) + 86_400L
+        var emptyChunksInARow = 0
+
+        for (step in 0 until 14) {
+            if (windowTo <= start1390Sec) break
+            val windowFrom = (windowTo - chunkDaysSec).coerceAtLeast(start1390Sec)
+            val chunk = fetchNobitexHistoryWindow(fromSec = windowFrom, toSec = windowTo)
+            if (chunk.isEmpty()) {
+                emptyChunksInARow++
+                if (collected.isNotEmpty() || emptyChunksInARow >= 2) break
+            } else {
+                emptyChunksInARow = 0
+                var newlyAdded = 0
+                for (pt in chunk) {
+                    if (!collected.containsKey(pt.shamsiDate)) {
+                        collected[pt.shamsiDate] = pt
+                        newlyAdded++
+                    }
+                }
+                if (newlyAdded == 0) break
+            }
+            windowTo = windowFrom - 86_400L
+        }
+
+        return collected.values.sortedBy { it.epochMs }
+    }
+
+    private fun fetchNobitexHistoryWindow(fromSec: Long, toSec: Long): List<TgjuHistoryPoint> {
+        val hosts = listOf("https://apiv2.nobitex.ir", "https://api.nobitex.ir")
+        val symbols = listOf("GRAMUSDT", "1000GRAMUSDT")
+        for (sym in symbols) {
+            for (host in hosts) {
+                try {
+                    val url = "$host/market/udf/history?symbol=$sym&resolution=D&from=$fromSec&to=$toSec"
+                    val jsonText = downloadText(url, referer = NobitexMarketService.GRAM_PAGE_URL)
+                    if (!jsonText.isNullOrBlank()) {
+                        val parsed = parseNobitexUdfHistoryJson(jsonText, convertRialsToTomans = false)
+                        if (parsed.isNotEmpty()) return parsed
+                    }
+                } catch (_: Exception) {
+                }
+            }
+        }
+        return emptyList()
+    }
+
+    /**
+     * Parses Nobitex TradingView UDF history JSON (`{"s":"ok","t":[...],"h":[...],"l":[...],"c":[...]}`).
+     * For `*USDT` pairs (e.g. `GRAMUSDT`), prices are already denominated in USD (`convertRialsToTomans = false`).
+     * For `*IRT` pairs, set `convertRialsToTomans = true` to convert Rials ÷ 10 into Tomans.
+     */
+    fun parseNobitexUdfHistoryJson(
+        jsonText: String,
+        convertRialsToTomans: Boolean = false
+    ): List<TgjuHistoryPoint> {
+        return try {
+            if (!Regex(""""s"\s*:\s*"ok"""", RegexOption.IGNORE_CASE).containsMatchIn(jsonText)) {
+                return emptyList()
+            }
+            val tArr = extractJsonNumberArray(jsonText, "t")
+            val cArr = extractJsonNumberArray(jsonText, "c")
+            if (tArr.isEmpty() || cArr.isEmpty()) return emptyList()
+            val hArr = extractJsonNumberArray(jsonText, "h")
+            val lArr = extractJsonNumberArray(jsonText, "l")
+            val count = minOf(tArr.size, cArr.size)
+            val points = ArrayList<TgjuHistoryPoint>(count)
+            val divisor = if (convertRialsToTomans) 10.0 else 1.0
+
+            for (i in 0 until count) {
+                val tsSec = tArr[i].toLong()
+                val closeVal = cArr[i]
+                if (tsSec <= 0L || closeVal.isNaN() || closeVal <= 0.0) continue
+
+                val highVal = hArr.getOrNull(i)?.takeIf { !it.isNaN() && it > 0.0 } ?: closeVal
+                val lowVal = lArr.getOrNull(i)?.takeIf { !it.isNaN() && it > 0.0 } ?: closeVal
+
+                val priceOut = closeVal / divisor
+                val highOut = maxOf(highVal, closeVal) / divisor
+                val lowOut = minOf(lowVal, closeVal) / divisor
+
+                val epochMs = tsSec * 1000L
+                val shamsi = PersianDateHelper.getShamsiDate(epochMs)
+                if (shamsi.year < MIN_SHAMSI_YEAR) continue
+                val cal = Calendar.getInstance().apply { timeInMillis = epochMs }
+                val shortWeek = weekdayShortFromCalendar(cal.get(Calendar.DAY_OF_WEEK))
+
+                points.add(
+                    TgjuHistoryPoint(
+                        epochMs = epochMs,
+                        price = priceOut,
+                        high = highOut,
+                        low = lowOut,
+                        shamsiDate = shamsi.format(),
+                        shamsiYear = shamsi.year,
+                        shamsiMonth = shamsi.month,
+                        shamsiDay = shamsi.day,
+                        weekdayFa = shamsi.dayOfWeek,
+                        shortWeekdayFa = shortWeek,
+                        monthDayFa = "${shamsi.day} ${shamsi.monthName}"
+                    )
+                )
+            }
+            points.distinctBy { it.shamsiDate }.sortedBy { it.epochMs }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun extractJsonNumberArray(jsonText: String, key: String): List<Double> {
+        val match = Regex(""""$key"\s*:\s*\[([^\]]*)\]""").find(jsonText) ?: return emptyList()
+        val body = match.groupValues[1].trim()
+        if (body.isEmpty()) return emptyList()
+        return body.split(',').mapNotNull { token ->
+            token.trim().trim('"').toDoubleOrNull()
+        }
     }
 
     /**
@@ -594,8 +731,43 @@ object TgjuHistoryService {
             ageDays <= TgjuChartRange.MONTH_1.daysBack -> TgjuChartRange.MONTH_1
             ageDays <= TgjuChartRange.MONTH_6.daysBack -> TgjuChartRange.MONTH_6
             ageDays <= TgjuChartRange.YEAR_1.daysBack -> TgjuChartRange.YEAR_1
+            ageDays <= TgjuChartRange.YEAR_3.daysBack -> TgjuChartRange.YEAR_3
+            ageDays <= TgjuChartRange.YEAR_5.daysBack -> TgjuChartRange.YEAR_5
+            ageDays <= TgjuChartRange.YEAR_10.daysBack -> TgjuChartRange.YEAR_10
             else -> TgjuChartRange.FROM_1390
         }
+    }
+
+    /**
+     * Finds the exact highest and lowest price points within the given range points list.
+     */
+    fun findRangeExtremes(points: List<TgjuHistoryPoint>): TgjuFifteenYearExtremes? {
+        if (points.isEmpty()) return null
+        val highest = points.maxWithOrNull(
+            compareBy<TgjuHistoryPoint> { it.price }.thenBy { it.epochMs }
+        ) ?: return null
+        val lowest = points.minWithOrNull(
+            compareBy<TgjuHistoryPoint> { it.price }.thenByDescending { it.epochMs }
+        ) ?: return null
+
+        return TgjuFifteenYearExtremes(
+            highestPoint = highest,
+            lowestPoint = lowest
+        )
+    }
+
+    /**
+     * Finds the highest and lowest price points within the last 15 years (relative to the latest
+     * recorded data point). If the asset's available history is shorter than 15 years, evaluates
+     * across all available recorded points.
+     */
+    fun findFifteenYearExtremes(allPoints: List<TgjuHistoryPoint>): TgjuFifteenYearExtremes? {
+        if (allPoints.isEmpty()) return null
+        val latestMs = allPoints.last().epochMs
+        val fifteenYearsMs = (15L * 365L + 4L) * ONE_DAY_MS
+        val cutoffMs = latestMs - fifteenYearsMs
+        val windowPoints = allPoints.filter { it.epochMs >= cutoffMs }.ifEmpty { allPoints }
+        return findRangeExtremes(windowPoints)
     }
 
     // ---- Persistent Device Cache (Atomic File Storage in filesDir) ----

@@ -44,7 +44,6 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -82,13 +81,13 @@ import com.example.data.model.ExpenseEntity
 import com.example.ui.components.AddExpenseBottomSheet
 import com.example.ui.components.SettingsDialog
 import com.example.ui.screens.AnnualCalendarScreen
-import com.example.ui.screens.AnnualCommitmentsScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.EntertainmentScreen
 import com.example.ui.screens.MonthDetailScreen
 import com.example.ui.screens.NewsScreen
 import com.example.ui.screens.ReportsScreen
 import com.example.ui.screens.ReportsTabSection
+import com.example.ui.screens.ToolSection
 import com.example.ui.screens.ToolsScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.ExpenseViewModel
@@ -118,13 +117,13 @@ import com.example.utils.FontScaleHelper
 import com.example.utils.GitHubUpdateHelper
 import com.example.utils.PersianDateHelper
 import com.example.utils.ReportTableExporter
+import com.example.utils.StickyNoteNotificationHelper
 import com.example.utils.configureAppCheck
 
 enum class ScreenTab(val title: String, val icon: ImageVector) {
     DASHBOARD("خانه", Icons.Default.Home),
     REPORTS("گزارش‌ها", Icons.Default.QueryStats),
     TOOLS("امکانات", Icons.Default.Calculate),
-    ANNUAL("تعهدات", Icons.Default.Shield),
     NEWS("اخبار", Icons.Default.Newspaper),
     ENTERTAINMENT("سرگرمی", Icons.Default.SportsEsports)
 }
@@ -132,11 +131,23 @@ enum class ScreenTab(val title: String, val icon: ImageVector) {
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ExpenseViewModel by viewModels()
+    private val openStickyNotesTrigger = mutableStateOf(0)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(StickyNoteNotificationHelper.EXTRA_OPEN_STICKY_NOTES, false)) {
+            openStickyNotesTrigger.value += 1
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Configure Firebase App Check with launch intent before any UI, ViewModels, or Firebase operations
         configureAppCheck(this, intent)
+        if (intent?.getBooleanExtra(StickyNoteNotificationHelper.EXTRA_OPEN_STICKY_NOTES, false) == true) {
+            openStickyNotesTrigger.value += 1
+        }
 
         enableEdgeToEdge()
         window.decorView.isVerticalScrollBarEnabled = false
@@ -176,7 +187,8 @@ class MainActivity : ComponentActivity() {
                         fontColorOption = fontColorOption,
                         onFontColorChange = { newColor ->
                             fontColorOption = FontScaleHelper.saveFontColor(this, newColor)
-                        }
+                        },
+                        openStickyNotesSignal = openStickyNotesTrigger.value
                     )
                 }
             }
@@ -193,14 +205,26 @@ fun ExpenseTrackerApp(
     fontScale: Float = FontScaleHelper.DEFAULT_SCALE,
     onFontScaleChange: (Float) -> Unit = {},
     fontColorOption: AppFontColorOption = AppFontColorOption.DEFAULT,
-    onFontColorChange: (AppFontColorOption) -> Unit = {}
+    onFontColorChange: (AppFontColorOption) -> Unit = {},
+    openStickyNotesSignal: Int = 0
 ) {
     val context = LocalContext.current
     val allExpenses by viewModel.allExpenses.collectAsStateWithLifecycle()
     val customFolders by viewModel.customFolders.collectAsStateWithLifecycle()
+    val annualExpenses by viewModel.annualExpenses.collectAsStateWithLifecycle()
+    val totalAnnualCommitments by viewModel.totalAnnualCommitments.collectAsStateWithLifecycle()
+    val monthlyAmortizedShare by viewModel.monthlyAmortizedShare.collectAsStateWithLifecycle()
 
     var currentTab by rememberSaveable { mutableStateOf(ScreenTab.DASHBOARD) }
     var reportsInitialSubTab by rememberSaveable { mutableStateOf(ReportsTabSection.FOLDER_REPORTS) }
+    var toolsInitialSection by remember { mutableStateOf<ToolSection?>(null) }
+
+    LaunchedEffect(openStickyNotesSignal) {
+        if (openStickyNotesSignal > 0) {
+            toolsInitialSection = ToolSection.STICKY_NOTES
+            currentTab = ScreenTab.TOOLS
+        }
+    }
     var isBottomBarCollapsed by rememberSaveable { mutableStateOf(false) }
     var showAddBottomSheet by remember { mutableStateOf(false) }
     var showVoiceExpenseDialog by remember { mutableStateOf(false) }
@@ -394,7 +418,6 @@ fun ExpenseTrackerApp(
                                 ScreenTab.DASHBOARD -> Color(0xFF10B981)     // Emerald
                                 ScreenTab.REPORTS -> Color(0xFF0EA5E9)       // Sky Cyan
                                 ScreenTab.TOOLS -> Color(0xFFF59E0B)         // Radiant Gold
-                                ScreenTab.ANNUAL -> Color(0xFFA855F7)        // Amethyst Violet
                                 ScreenTab.NEWS -> Color(0xFFF43F5E)          // Coral Rose
                                 ScreenTab.ENTERTAINMENT -> Color(0xFF14B8A6) // Luminous Teal
                             }
@@ -526,7 +549,11 @@ fun ExpenseTrackerApp(
                             currentTab = ScreenTab.NEWS
                         },
                         onNavigateToAnnual = {
-                            currentTab = ScreenTab.ANNUAL
+                            editingExpense = null
+                            preselectedReceiptPathForAdd = null
+                            isAnnualPreselected = true
+                            preselectedDateForAdd = PersianDateHelper.getShamsiDate().format()
+                            showAddBottomSheet = true
                         },
                         onAddExpenseClick = {
                             editingExpense = null
@@ -569,6 +596,7 @@ fun ExpenseTrackerApp(
                 ScreenTab.TOOLS -> {
                     ToolsScreen(
                         viewModel = viewModel,
+                        initialToolSection = toolsInitialSection,
                         onAddExpenseWithAmount = { amount ->
                             editingExpense = null
                             preselectedReceiptPathForAdd = null
@@ -582,24 +610,6 @@ fun ExpenseTrackerApp(
                             preselectedAmountForAdd = null
                             preselectedReceiptPathForAdd = receiptPath
                             preselectedDateForAdd = PersianDateHelper.getShamsiDate().format()
-                            showAddBottomSheet = true
-                        }
-                    )
-                }
-                ScreenTab.ANNUAL -> {
-                    AnnualCommitmentsScreen(
-                        viewModel = viewModel,
-                        onAddAnnualExpenseClick = {
-                            editingExpense = null
-                            preselectedReceiptPathForAdd = null
-                            isAnnualPreselected = true
-                            preselectedDateForAdd = PersianDateHelper.getShamsiDate().format()
-                            showAddBottomSheet = true
-                        },
-                        onEditAnnualExpense = { entity ->
-                            preselectedReceiptPathForAdd = null
-                            editingExpense = viewModel.getOriginalExpenseForEdit(entity)
-                            isAnnualPreselected = true
                             showAddBottomSheet = true
                         }
                     )
@@ -712,7 +722,18 @@ fun ExpenseTrackerApp(
                 viewModel.updateExpense(updated)
                 editingExpense = null
             },
-            availableFolders = customFolders.map { it.name }
+            availableFolders = customFolders.map { it.name },
+            annualExpenses = annualExpenses,
+            totalAnnualCommitments = totalAnnualCommitments,
+            monthlyAmortizedShare = monthlyAmortizedShare,
+            onEditAnnualExpense = { entity ->
+                preselectedReceiptPathForAdd = null
+                editingExpense = viewModel.getOriginalExpenseForEdit(entity)
+                isAnnualPreselected = true
+            },
+            onDeleteAnnualExpense = { entity ->
+                viewModel.deleteExpense(entity)
+            }
         )
     }
 
