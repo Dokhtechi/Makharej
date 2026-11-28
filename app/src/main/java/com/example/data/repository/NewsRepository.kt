@@ -131,28 +131,69 @@ class NewsRepository(private val context: Context) {
             try {
                 val refreshEpochMs = System.currentTimeMillis()
                 val feedConfigs = listOf(
-                    // Dedicated Iranian Accidents (حوادث) & Crime/Emergency Feeds
+                    // 1. حوادث (ACCIDENTS)
                     FeedConfig("https://www.rokna.net/feeds/", NewsSource.ROKNA, NewsCategory.ACCIDENTS),
                     FeedConfig("https://www.rokna.net/fa/rss/allnews", NewsSource.ROKNA, NewsCategory.ACCIDENTS),
                     FeedConfig("https://www.khabaronline.ir/rss/tp/13", NewsSource.KHABARONLINE, NewsCategory.ACCIDENTS),
                     FeedConfig("https://www.tabnak.ir/fa/rss/6", NewsSource.TABNAK, NewsCategory.ACCIDENTS),
-                    // General, Economy, Politics, Tech, Social, Health Feeds
-                    FeedConfig("https://fararu.com/fa/rss/allnews", NewsSource.FARARU, null),
+
+                    // 2. اقتصادی (ECONOMY)
                     FeedConfig("https://www.eghtesadonline.com/fa/rss/allnews", NewsSource.EGHTESADONLINE, NewsCategory.ECONOMY),
+                    FeedConfig("https://www.khabaronline.ir/rss/tp/2", NewsSource.KHABARONLINE, NewsCategory.ECONOMY),
+                    FeedConfig("https://www.tabnak.ir/fa/rss/3", NewsSource.TABNAK, NewsCategory.ECONOMY),
+                    FeedConfig("https://aftabnews.ir/fa/rss/4", NewsSource.AFTAB, NewsCategory.ECONOMY),
+
+                    // 3. سیاسی (POLITICS)
+                    FeedConfig("https://www.khabaronline.ir/rss/tp/1", NewsSource.KHABARONLINE, NewsCategory.POLITICS),
+                    FeedConfig("https://www.tabnak.ir/fa/rss/2", NewsSource.TABNAK, NewsCategory.POLITICS),
+                    FeedConfig("https://aftabnews.ir/fa/rss/5", NewsSource.AFTAB, NewsCategory.POLITICS),
+                    FeedConfig("https://sahamnews.org/feed/", NewsSource.SAHAM, NewsCategory.POLITICS),
+
+                    // 4. تکنولوژی (TECHNOLOGY)
+                    FeedConfig("https://www.zoomit.ir/feed/", NewsSource.ZOOMIT, NewsCategory.TECHNOLOGY),
+                    FeedConfig("https://www.khabaronline.ir/rss/tp/7", NewsSource.KHABARONLINE, NewsCategory.TECHNOLOGY),
+                    FeedConfig("https://www.tabnak.ir/fa/rss/22", NewsSource.TABNAK, NewsCategory.TECHNOLOGY),
+
+                    // 5. علمی (SCIENCE)
+                    FeedConfig("https://www.zoomit.ir/science/feed/", NewsSource.ZOOMIT, NewsCategory.SCIENCE),
+                    FeedConfig("https://www.khabaronline.ir/rss/tp/6", NewsSource.KHABARONLINE, NewsCategory.SCIENCE),
+                    FeedConfig("https://aftabnews.ir/fa/rss/13", NewsSource.AFTAB, NewsCategory.SCIENCE),
+                    FeedConfig("https://www.tabnak.ir/fa/rss/7", NewsSource.TABNAK, NewsCategory.SCIENCE),
+                    FeedConfig("https://fararu.com/fa/rss/17", NewsSource.FARARU, NewsCategory.SCIENCE),
+
+                    // 6. فرهنگی (CULTURAL)
+                    FeedConfig("https://aftabnews.ir/fa/rss/3", NewsSource.AFTAB, NewsCategory.CULTURAL),
+                    FeedConfig("https://www.khabaronline.ir/rss/tp/4", NewsSource.KHABARONLINE, NewsCategory.CULTURAL),
+                    FeedConfig("https://www.tabnak.ir/fa/rss/5", NewsSource.TABNAK, NewsCategory.CULTURAL),
+                    FeedConfig("https://fararu.com/fa/rss/14", NewsSource.FARARU, NewsCategory.CULTURAL),
+
+                    // 7. اجتماعی (SOCIAL)
+                    FeedConfig("https://www.khabaronline.ir/rss/tp/5", NewsSource.KHABARONLINE, NewsCategory.SOCIAL),
+                    FeedConfig("https://www.tabnak.ir/fa/rss/4", NewsSource.TABNAK, NewsCategory.SOCIAL),
+                    FeedConfig("https://aftabnews.ir/fa/rss/2", NewsSource.AFTAB, NewsCategory.SOCIAL),
+                    FeedConfig("https://fararu.com/fa/rss/13", NewsSource.FARARU, NewsCategory.SOCIAL),
+
+                    // 8. سلامت (HEALTH)
+                    FeedConfig("https://aftabnews.ir/fa/rss/6", NewsSource.AFTAB, NewsCategory.HEALTH),
+                    FeedConfig("https://www.zoomit.ir/health/feed/", NewsSource.ZOOMIT, NewsCategory.HEALTH),
+                    FeedConfig("https://www.khabaronline.ir/rss/tp/11", NewsSource.KHABARONLINE, NewsCategory.HEALTH),
+                    FeedConfig("https://www.tabnak.ir/fa/rss/18", NewsSource.TABNAK, NewsCategory.HEALTH),
+                    FeedConfig("https://fararu.com/fa/rss/18", NewsSource.FARARU, NewsCategory.HEALTH),
+
+                    // 9. عمومی (All-news feeds for extra breadth across categories)
+                    FeedConfig("https://fararu.com/fa/rss/allnews", NewsSource.FARARU, null),
                     FeedConfig("https://www.khabaronline.ir/rss", NewsSource.KHABARONLINE, null),
                     FeedConfig("https://aftabnews.ir/fa/rss/allnews", NewsSource.AFTAB, null),
-                    FeedConfig("https://www.tabnak.ir/fa/rss/allnews", NewsSource.TABNAK, null),
-                    FeedConfig("https://www.zoomit.ir/feed/", NewsSource.ZOOMIT, NewsCategory.TECHNOLOGY),
-                    FeedConfig("https://sahamnews.org/feed/", NewsSource.SAHAM, null)
+                    FeedConfig("https://www.tabnak.ir/fa/rss/allnews", NewsSource.TABNAK, null)
                 )
 
-                val fetchedBatches = withTimeoutOrNull(26_000L) {
+                val fetchedBatches = withTimeoutOrNull(32_000L) {
                     supervisorScope {
                         feedConfigs.map { cfg ->
                             async {
                                 try {
-                                    withTimeoutOrNull(11_000L) {
-                                        fetchRssFeed(cfg, refreshEpochMs).take(12)
+                                    withTimeoutOrNull(12_000L) {
+                                        fetchRssFeed(cfg, refreshEpochMs).take(25)
                                     }.orEmpty()
                                 } catch (ce: CancellationException) {
                                     throw ce
@@ -173,11 +214,29 @@ class NewsRepository(private val context: Context) {
                     }
                     .sortedByDescending { it.timestamp }
 
-                // Ensure balanced mix up to 60 total articles with Accidents (حوادث) prominently represented
-                val accidentsBucket = allDeduped.filter { it.category == NewsCategory.ACCIDENTS }.take(14)
-                val accidentsIds = accidentsBucket.map { it.id }.toHashSet()
-                val othersBucket = allDeduped.filter { it.id !in accidentsIds }.take(TARGET_TOTAL_NEWS_COUNT - accidentsBucket.size)
-                val freshArticles = (accidentsBucket + othersBucket)
+                // Balanced per-category selection: guarantee at least 10-12 articles per category (>= 80 total)
+                val activeCategories = NewsCategory.entries.filter { it != NewsCategory.ALL }
+                val selectedArticles = mutableListOf<NewsArticle>()
+                val selectedIds = HashSet<String>()
+
+                for (category in activeCategories) {
+                    val catItems = allDeduped
+                        .filter { it.category == category && it.id !in selectedIds }
+                        .take(PREFERRED_PER_CATEGORY_COUNT)
+                    for (item in catItems) {
+                        selectedArticles.add(item)
+                        selectedIds.add(item.id)
+                    }
+                }
+
+                if (selectedArticles.size < TARGET_TOTAL_NEWS_COUNT) {
+                    val remaining = allDeduped
+                        .filter { it.id !in selectedIds }
+                        .take(TARGET_TOTAL_NEWS_COUNT - selectedArticles.size)
+                    selectedArticles.addAll(remaining)
+                }
+
+                val freshArticles = selectedArticles
                     .sortedByDescending { it.timestamp }
                     .take(TARGET_TOTAL_NEWS_COUNT)
 
@@ -372,7 +431,8 @@ class NewsRepository(private val context: Context) {
     }
 
     companion object {
-        const val TARGET_TOTAL_NEWS_COUNT = 60
+        const val TARGET_TOTAL_NEWS_COUNT = 120
+        const val PREFERRED_PER_CATEGORY_COUNT = 14
         private const val LATEST_NEWS_FILE_NAME = "latest_news_batch_v2.json"
         private const val NEWS_PREFS_NAME = "news_latest_prefs"
 
@@ -496,9 +556,26 @@ class NewsRepository(private val context: Context) {
             defaultCategory: NewsCategory?
         ): NewsCategory {
             val combined = "$rssCategories $title $summary"
-            if (defaultCategory == NewsCategory.ACCIDENTS) {
-                return NewsCategory.ACCIDENTS
+
+            // Honor dedicated category RSS feeds directly (with Science/Health enrichment on Zoomit main feed)
+            if (defaultCategory != null) {
+                if (defaultCategory == NewsCategory.TECHNOLOGY) {
+                    if (combined.contains("نجوم") || combined.contains("فضا") || combined.contains("ناسا") ||
+                        combined.contains("فیزیک") || combined.contains("شیمی") || combined.contains("زیست‌شناسی") ||
+                        combined.contains("کهکشان") || combined.contains("باستان‌شناسی") || combined.contains("علمی") ||
+                        combined.contains("دانشمندان")
+                    ) {
+                        return NewsCategory.SCIENCE
+                    }
+                    if (combined.contains("سلامت") || combined.contains("پزشک") || combined.contains("بیماری") ||
+                        combined.contains("دارو") || combined.contains("تغذیه") || combined.contains("درمان")
+                    ) {
+                        return NewsCategory.HEALTH
+                    }
+                }
+                return defaultCategory
             }
+
             return when {
                 combined.contains("حادثه") || combined.contains("حوادث") || combined.contains("تصادف") ||
                     combined.contains("آتش‌سوزی") || combined.contains("آتش سوزی") || combined.contains("حریق") ||
@@ -513,29 +590,35 @@ class NewsRepository(private val context: Context) {
                 combined.contains("اقتصاد") || combined.contains("ارز") || combined.contains("دلار") ||
                     combined.contains("طلا") || combined.contains("سکه") || combined.contains("بورس") ||
                     combined.contains("بانک") || combined.contains("قیمت") || combined.contains("مسکن") ||
-                    combined.contains("تورم") || combined.contains("نفت") -> NewsCategory.ECONOMY
+                    combined.contains("تورم") || combined.contains("نفت") || combined.contains("خودرو") ||
+                    combined.contains("یارانه") || combined.contains("معیشت") -> NewsCategory.ECONOMY
 
                 combined.contains("سلامت") || combined.contains("پزشک") || combined.contains("درمان") ||
                     combined.contains("دارو") || combined.contains("بیمار") || combined.contains("واکسن") ||
-                    combined.contains("تغذیه") -> NewsCategory.HEALTH
+                    combined.contains("تغذیه") || combined.contains("بهداشت") || combined.contains("بیمارستان") ||
+                    combined.contains("سرطان") || combined.contains("ویروس") -> NewsCategory.HEALTH
+
+                combined.contains("علمی") || combined.contains("دانشمند") || combined.contains("نجوم") ||
+                    combined.contains("دانشگاه") || combined.contains("فضا") || combined.contains("ناسا") ||
+                    combined.contains("فیزیک") || combined.contains("پژوهش") || combined.contains("تحقیقات") ||
+                    combined.contains("کهکشان") || combined.contains("مریخ") || combined.contains("زیست") ||
+                    combined.contains("کنکور") || combined.contains("دانشجو") -> NewsCategory.SCIENCE
 
                 combined.contains("فناوری") || combined.contains("تکنولوژی") || combined.contains("هوش مصنوعی") ||
                     combined.contains("اینترنت") || combined.contains("موبایل") || combined.contains("گوشی") ||
-                    combined.contains("تراشه") || combined.contains("نرم‌افزار") -> NewsCategory.TECHNOLOGY
-
-                combined.contains("علمی") || combined.contains("دانش") || combined.contains("نجوم") ||
-                    combined.contains("دانشگاه") || combined.contains("فضا") || combined.contains("فیزیک") ||
-                    combined.contains("پژوهش") -> NewsCategory.SCIENCE
+                    combined.contains("تراشه") || combined.contains("نرم‌افزار") || combined.contains("سامسونگ") ||
+                    combined.contains("اپل") || combined.contains("گوگل") || combined.contains("لپ‌تاپ") -> NewsCategory.TECHNOLOGY
 
                 combined.contains("فرهنگ") || combined.contains("کتاب") || combined.contains("سینما") ||
                     combined.contains("هنر") || combined.contains("موزه") || combined.contains("میراث") ||
-                    combined.contains("موسیقی") || combined.contains("فیلم") -> NewsCategory.CULTURAL
+                    combined.contains("موسیقی") || combined.contains("فیلم") || combined.contains("تئاتر") ||
+                    combined.contains("سریال") || combined.contains("بازیگر") || combined.contains("کارگردان") -> NewsCategory.CULTURAL
 
                 combined.contains("اجتماعی") || combined.contains("جامعه") || combined.contains("آموزش") ||
-                    combined.contains("مدرسه") || combined.contains("خانواده") ||
-                    combined.contains("شهری") || combined.contains("ترافیک") -> NewsCategory.SOCIAL
+                    combined.contains("مدرسه") || combined.contains("خانواده") || combined.contains("شهرداری") ||
+                    combined.contains("شهری") || combined.contains("ترافیک") || combined.contains("هواشناسی") ||
+                    combined.contains("بارش") || combined.contains("آلودگی هوا") || combined.contains("محیط زیست") -> NewsCategory.SOCIAL
 
-                defaultCategory != null -> defaultCategory
                 else -> NewsCategory.POLITICS
             }
         }

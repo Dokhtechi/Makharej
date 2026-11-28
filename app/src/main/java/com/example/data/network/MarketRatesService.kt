@@ -12,7 +12,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Calendar
 import java.util.Locale
+import java.util.TimeZone
+import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
@@ -29,17 +32,21 @@ class MarketRatesService(private val context: Context) {
      */
     suspend fun fetchRates(): MarketRatesState = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val nonce = (now % 999983L).toString()
+        val nonce = UUID.randomUUID().toString().replace("-", "").take(12)
+        val todayTehranDay = getTehranShamsiDay(now)
+
+        // Purge any previous-day cached entries immediately so yesterday's prices are never shown
+        purgePreviousDayCacheIfNeeded(todayTehranDay)
 
         var merged = TgjuExtractedRates()
         var tgjuSucceeded = false
         var nobitexSucceeded = false
 
         supervisorScope {
-            // 1. ایزوله‌سازی کامل منبع TGJU با سقف زمانی مستقل (ارز، سکه تک‌فروشی، طلا، بیت‌کوین، نفت برنت)
+            // 1. ایزوله‌سازی کامل منبع TGJU با اولویت فید لحظه‌ای زنده (call.tgju.org) و HTML مستقیم tgju.org/coin
             val tgjuResult = try {
-                withTimeoutOrNull(18_000L) {
-                    fetchTgjuRatesIsolated(now = now, nonce = nonce)
+                withTimeoutOrNull(20_000L) {
+                    fetchTgjuRatesIsolated(now = now, nonce = nonce, todayTehranDay = todayTehranDay)
                 }
             } catch (ce: CancellationException) {
                 throw ce
@@ -47,14 +54,21 @@ class MarketRatesService(private val context: Context) {
                 null
             }
             if (tgjuResult != null && tgjuResult.hasAny()) {
-                merged = merged.mergeMissing(tgjuResult.copy(tether = null, gram = null))
+                merged = merged.mergeFresher(tgjuResult.copy(tether = null, gram = null), todayTehranDay)
                 tgjuSucceeded = true
             }
 
-            // 2. ایزوله‌سازی کامل منبع Nobitex با سقف زمانی مستقل (تتر به تومان و رمزارز گرام به دلار از nobitex.ir/price/gram)
-            val prevNobitexTether = prefs.getLong("nobitex_v1_tether_price", 0L)
-            val prevNobitexGramUsd = prefs.getString("nobitex_v2_gram_usd_price_str", "")
-                ?.replace("$", "")?.replace(",", "")?.trim()?.toDoubleOrNull() ?: 0.0
+            // 2. ایزوله‌سازی کامل منبع Nobitex (تتر به تومان و رمزارز گرام به دلار از nobitex.ir/price/gram)
+            val prevTetherDay = prefs.getString("nobitex_v1_tether_tehran_day", "") ?: ""
+            val prevNobitexTether = if (prevTetherDay == todayTehranDay) {
+                prefs.getLong("nobitex_v1_tether_price", 0L)
+            } else 0L
+            val prevGramDay = prefs.getString("nobitex_v2_gram_usd_tehran_day", "") ?: ""
+            val prevNobitexGramUsd = if (prevGramDay == todayTehranDay) {
+                prefs.getString("nobitex_v2_gram_usd_price_str", "")
+                    ?.replace("$", "")?.replace(",", "")?.trim()?.toDoubleOrNull() ?: 0.0
+            } else 0.0
+
             val nobitexResult = try {
                 withTimeoutOrNull(15_000L) {
                     NobitexMarketService.fetchTetherAndGram(
@@ -69,8 +83,14 @@ class MarketRatesService(private val context: Context) {
             }
             if (nobitexResult != null && nobitexResult.hasAny()) {
                 merged = merged.copy(
-                    tether = nobitexResult.tether ?: merged.tether,
-                    gram = nobitexResult.gram ?: merged.gram
+                    tether = nobitexResult.tether?.copy(
+                        sourceTimestampMs = now,
+                        sourceTehranDay = todayTehranDay
+                    ) ?: merged.tether,
+                    gram = nobitexResult.gram?.copy(
+                        sourceTimestampMs = now,
+                        sourceTehranDay = todayTehranDay
+                    ) ?: merged.gram
                 )
                 nobitexSucceeded = true
             }
@@ -82,7 +102,7 @@ class MarketRatesService(private val context: Context) {
         }
 
         val err = if (!fetchedAny) {
-            "خطا در دریافت نرخ‌ها از tgju.org و nobitex.ir (نمایش آخرین مقادیر ذخیره‌شده)"
+            "خطا در دریافت نرخ‌های امروز از tgju.org و nobitex.ir"
         } else {
             null
         }
@@ -94,7 +114,15 @@ class MarketRatesService(private val context: Context) {
      * Updates only Tether in cache without touching any other currency or triggering TGJU requests.
      */
     suspend fun fetchTetherOnly(): Pair<MarketRatesState, Boolean> = withContext(Dispatchers.IO) {
-        val prevNobitexTether = prefs.getLong("nobitex_v1_tether_price", 0L)
+        val now = System.currentTimeMillis()
+        val todayTehranDay = getTehranShamsiDay(now)
+        purgePreviousDayCacheIfNeeded(todayTehranDay)
+
+        val prevTetherDay = prefs.getString("nobitex_v1_tether_tehran_day", "") ?: ""
+        val prevNobitexTether = if (prevTetherDay == todayTehranDay) {
+            prefs.getLong("nobitex_v1_tether_price", 0L)
+        } else 0L
+
         val freshTether = try {
             withTimeoutOrNull(12_000L) {
                 NobitexMarketService.fetchTetherOnly(previousTetherTomans = prevNobitexTether)
@@ -106,10 +134,12 @@ class MarketRatesService(private val context: Context) {
         }
 
         if (freshTether != null) {
-            val shamsiUpdate = formatExactRefreshTimestamp(System.currentTimeMillis())
+            val stamped = freshTether.copy(sourceTimestampMs = now, sourceTehranDay = todayTehranDay)
+            val shamsiUpdate = formatExactRefreshTimestamp(now)
             prefs.edit().apply {
-                saveItem(this, "nobitex_v1_tether", freshTether)
+                saveItemIfFresh(this, "nobitex_v1_tether", stamped, todayTehranDay)
                 putString("tgju_v5_last_update", shamsiUpdate)
+                putString("tgju_v5_cache_day", todayTehranDay)
                 apply()
             }
             return@withContext buildCurrentState(errorMessage = null) to true
@@ -117,64 +147,83 @@ class MarketRatesService(private val context: Context) {
         buildCurrentState(errorMessage = null) to false
     }
 
-    private fun fetchTgjuRatesIsolated(now: Long, nonce: String): TgjuExtractedRates {
+    /**
+     * Live-first TGJU extraction designed specifically to prevent stale intraday caches (11:00-17:00 IRST)
+     * and after-17:00 regressions to yesterday's prices:
+     * 1) Primary: TGJU's real-time AJAX ticker mirrors (`call.tgju.org` + fresh rotated `call1..5`) — picks the newest server timestamp per item.
+     * 2) Secondary / Live Intraday Verification: Direct HTML from `https://www.tgju.org/coin` (and `/currency`, `/crypto` if needed)
+     *    whenever any item is missing OR its live ticker timestamp looks older than 2 minutes.
+     * 3) Last Resort Only: `api.tgju.org/v1/widget/tmp` (only fills still-missing today items, never overwrites fresh live rates).
+     */
+    private fun fetchTgjuRatesIsolated(
+        now: Long,
+        nonce: String,
+        todayTehranDay: String
+    ): TgjuExtractedRates {
         var merged = TgjuExtractedRates()
 
-        // اولویت اول: ویجت لحظه‌ای رسمی api.tgju.org (تک‌فروشی سکه امامی و ربع سکه) — تتر و گرام فقط از نوبیتکس
-        val allWidgetKeys = listOf(
-            "price_dollar_rl", "price_eur", "retail_sekee",
-            "retail_rob", "ons", "geram18",
-            "crypto-bitcoin", "oil_brent"
+        // اولویت اول: تیکر لحظه‌ای رسمی TGJU (منبع زنده سایت tgju.org) — مقایسه دو سرور برای گرفتن جدیدترین تیک
+        val rotatedMirrors = listOf(
+            "https://call.tgju.org/ajax.json",
+            "https://call1.tgju.org/ajax.json",
+            "https://call2.tgju.org/ajax.json",
+            "https://call3.tgju.org/ajax.json",
+            "https://call4.tgju.org/ajax.json",
+            "https://call5.tgju.org/ajax.json"
         )
-        runCatching {
-            val widgetUrl = "https://api.tgju.org/v1/widget/tmp?keys=${allWidgetKeys.joinToString(",")}&_t=$now&_r=$nonce"
-            val widgetJson = downloadText(widgetUrl, TGJU_COIN_URL)
-            if (!widgetJson.isNullOrBlank()) {
-                val (parsed, _) = parseAllFromTgjuWidgetJson(widgetJson)
-                merged = merged.mergeMissing(parsed.copy(tether = null))
+        val mirrorStartIdx = ((now / 1000L) % rotatedMirrors.size).toInt().coerceIn(0, rotatedMirrors.lastIndex)
+        val orderedAjaxEndpoints = buildList {
+            add(rotatedMirrors[0]) // همیشه call.tgju.org اصلی در صدر
+            for (offset in 0 until rotatedMirrors.size) {
+                val ep = rotatedMirrors[(mirrorStartIdx + offset) % rotatedMirrors.size]
+                if (!contains(ep)) add(ep)
             }
         }
 
-        // اولویت دوم: استخراج مستقیم از HTML زنده صفحه https://www.tgju.org/coin
-        if (!merged.isTgjuAssetsComplete()) {
+        var successfulMirrors = 0
+        for (endpoint in orderedAjaxEndpoints) {
+            if (successfulMirrors >= 2 && merged.isTgjuAssetsComplete()) break
             runCatching {
-                val html = downloadText("$TGJU_COIN_URL?_t=$now&_r=$nonce", TGJU_COIN_URL)
-                if (!html.isNullOrBlank()) {
-                    val parsed = parseAllFromTgjuCoinHtml(html)
-                    merged = merged.mergeMissing(parsed.copy(tether = null))
-                }
-            }
-        }
-
-        // اولویت سوم: سرورهای تیکر زنده TGJU
-        if (!merged.isTgjuAssetsComplete()) {
-            val ajaxEndpoints = listOf(
-                "https://call5.tgju.org/ajax.json?_t=$now&_r=$nonce",
-                "https://call4.tgju.org/ajax.json?_t=$now&_r=$nonce",
-                "https://call3.tgju.org/ajax.json?_t=$now&_r=$nonce",
-                "https://call2.tgju.org/ajax.json?_t=$now&_r=$nonce",
-                "https://call1.tgju.org/ajax.json?_t=$now&_r=$nonce",
-                "https://call.tgju.org/ajax.json?_t=$now&_r=$nonce"
-            )
-            for (endpoint in ajaxEndpoints) {
-                if (merged.isTgjuAssetsComplete()) break
-                runCatching {
-                    val jsonText = downloadText(endpoint, TGJU_COIN_URL)
-                    if (!jsonText.isNullOrBlank()) {
-                        val (parsed, _) = parseAllFromTgjuAjaxJson(jsonText)
-                        merged = merged.mergeMissing(parsed.copy(tether = null))
+                val url = "$endpoint?_t=$now&_r=$nonce&nc=${UUID.randomUUID().toString().take(8)}"
+                val jsonText = downloadText(url, TGJU_COIN_URL)
+                if (!jsonText.isNullOrBlank()) {
+                    val (parsed, _) = parseAllFromTgjuAjaxJson(jsonText, nowMs = now)
+                    val filteredToday = parsed.filterOutPreviousDays(todayTehranDay).copy(tether = null, gram = null)
+                    if (filteredToday.hasAny()) {
+                        merged = merged.mergeFresher(filteredToday, todayTehranDay)
+                        successfulMirrors++
                     }
                 }
             }
         }
 
-        // اولویت چهارم: صفحات تکمیلی TGJU برای دلار، یورو و بیت‌کوین
+        // اولویت دوم: استخراج مستقیم از HTML زنده صفحه https://www.tgju.org/coin
+        // اگر هر قلمی ناقص باشد یا قیمت دلار/سکه در فید AJAX قدیمی‌تر از 2 دقیقه باشد، صفحه اصلی را مستقیم چک می‌کنیم
+        val needsLiveCoinHtml = !merged.isTgjuAssetsComplete() ||
+            isStaleIntraday(merged.dollar, now) ||
+            isStaleIntraday(merged.sekehEmami, now) ||
+            isStaleIntraday(merged.robSekeh, now)
+
+        if (needsLiveCoinHtml) {
+            runCatching {
+                val html = downloadText("$TGJU_COIN_URL?_t=$now&_r=$nonce", TGJU_COIN_URL)
+                if (!html.isNullOrBlank()) {
+                    val parsed = parseAllFromTgjuCoinHtml(html, nowMs = now, todayTehranDay = todayTehranDay)
+                        .copy(tether = null, gram = null)
+                    // HTML صفحه اصلی tgju.org/coin اگر تازه است، موارد ناقص یا قدیمی‌تر از 2 دقیقه را به‌روزرسانی می‌کند
+                    merged = merged.mergeMissingOrStale(parsed, nowMs = now, todayTehranDay = todayTehranDay)
+                }
+            }
+        }
+
+        // اولویت سوم: صفحات تکمیلی TGJU برای دلار، یورو و بیت‌کوین در صورت ناقص بودن
         if (merged.euro == null || merged.dollar == null) {
             runCatching {
                 val html = downloadText("https://www.tgju.org/currency?_t=$now&_r=$nonce", TGJU_COIN_URL)
                 if (!html.isNullOrBlank()) {
-                    val parsed = parseAllFromTgjuCoinHtml(html)
-                    merged = merged.mergeMissing(parsed.copy(tether = null, gram = null))
+                    val parsed = parseAllFromTgjuCoinHtml(html, nowMs = now, todayTehranDay = todayTehranDay)
+                        .copy(tether = null, gram = null)
+                    merged = merged.mergeMissingOrStale(parsed, nowMs = now, todayTehranDay = todayTehranDay)
                 }
             }
         }
@@ -182,8 +231,27 @@ class MarketRatesService(private val context: Context) {
             runCatching {
                 val html = downloadText("https://www.tgju.org/crypto?_t=$now&_r=$nonce", TGJU_COIN_URL)
                 if (!html.isNullOrBlank()) {
-                    val parsed = parseAllFromTgjuCoinHtml(html)
-                    merged = merged.mergeMissing(parsed.copy(tether = null, gram = null))
+                    val parsed = parseAllFromTgjuCoinHtml(html, nowMs = now, todayTehranDay = todayTehranDay)
+                        .copy(tether = null, gram = null)
+                    merged = merged.mergeMissingOrStale(parsed, nowMs = now, todayTehranDay = todayTehranDay)
+                }
+            }
+        }
+
+        // اولویت آخر (فقط در صورت باقی ماندن قلم ناقص): ویجت api.tgju.org/v1/widget/tmp با فیلتر اکید حذف قیمت دیروز
+        if (!merged.isTgjuAssetsComplete()) {
+            val allWidgetKeys = listOf(
+                "price_dollar_rl", "price_eur", "retail_sekee",
+                "retail_rob", "ons", "geram18",
+                "crypto-bitcoin", "oil_brent"
+            )
+            runCatching {
+                val widgetUrl = "https://api.tgju.org/v1/widget/tmp?keys=${allWidgetKeys.joinToString(",")}&_t=$now&_r=$nonce"
+                val widgetJson = downloadText(widgetUrl, TGJU_COIN_URL)
+                if (!widgetJson.isNullOrBlank()) {
+                    val (parsed, _) = parseAllFromTgjuWidgetJson(widgetJson, nowMs = now)
+                    val filteredToday = parsed.filterOutPreviousDays(todayTehranDay).copy(tether = null, gram = null)
+                    merged = merged.mergeFresher(filteredToday, todayTehranDay)
                 }
             }
         }
@@ -191,20 +259,67 @@ class MarketRatesService(private val context: Context) {
         return merged
     }
 
+    private fun isStaleIntraday(item: MarketRateItem?, nowMs: Long): Boolean {
+        if (item == null) return true
+        if (item.sourceTimestampMs <= 0L) return false
+        return (nowMs - item.sourceTimestampMs) > 120_000L
+    }
+
     fun getCachedOrDefault(err: String? = null): MarketRatesState {
+        purgePreviousDayCacheIfNeeded(getTehranShamsiDay())
         return buildCurrentState(errorMessage = err)
     }
 
     fun hasAnyCachedTgjuRate(): Boolean {
-        return prefs.getLong("tgju_v5_dollar_price", 0L) > 0L ||
-            prefs.getLong("tgju_v6_retail_sekee_price", 0L) > 0L ||
-            prefs.getLong("tgju_v5_gold18_price", 0L) > 0L ||
-            !prefs.getString("nobitex_v2_gram_usd_price_str", "").isNullOrBlank() ||
-            prefs.getLong("nobitex_v1_tether_price", 0L) > 0L
+        val todayTehranDay = getTehranShamsiDay()
+        purgePreviousDayCacheIfNeeded(todayTehranDay)
+        return (prefs.getString("tgju_v5_dollar_tehran_day", "") == todayTehranDay && prefs.getLong("tgju_v5_dollar_price", 0L) > 0L) ||
+            (prefs.getString("tgju_v6_retail_sekee_tehran_day", "") == todayTehranDay && prefs.getLong("tgju_v6_retail_sekee_price", 0L) > 0L) ||
+            (prefs.getString("tgju_v5_gold18_tehran_day", "") == todayTehranDay && prefs.getLong("tgju_v5_gold18_price", 0L) > 0L) ||
+            (prefs.getString("nobitex_v2_gram_usd_tehran_day", "") == todayTehranDay && !prefs.getString("nobitex_v2_gram_usd_price_str", "").isNullOrBlank()) ||
+            (prefs.getString("nobitex_v1_tether_tehran_day", "") == todayTehranDay && prefs.getLong("nobitex_v1_tether_price", 0L) > 0L)
     }
 
-    private fun saveItem(editor: android.content.SharedPreferences.Editor, prefix: String, item: MarketRateItem?) {
+    /**
+     * Purges cached market prices from previous days (Tehran calendar day) so yesterday's
+     * closing prices are never displayed when the user opens or refreshes the app.
+     */
+    private fun purgePreviousDayCacheIfNeeded(todayTehranDay: String) {
+        val savedDay = prefs.getString("tgju_v5_cache_day", "") ?: ""
+        if (savedDay == todayTehranDay) return
+        val editor = prefs.edit()
+        for (prefix in ALL_CACHE_PREFIXES) {
+            val itemDay = prefs.getString("${prefix}_tehran_day", "") ?: ""
+            if (itemDay != todayTehranDay) {
+                editor.remove("${prefix}_price")
+                editor.remove("${prefix}_diff")
+                editor.remove("${prefix}_pct")
+                editor.remove("${prefix}_pos")
+                editor.remove("${prefix}_price_str")
+                editor.remove("${prefix}_diff_str")
+                editor.remove("${prefix}_time")
+                editor.remove("${prefix}_source_ts")
+                editor.remove("${prefix}_tehran_day")
+            }
+        }
+        editor.remove("tgju_v5_last_update")
+        editor.putString("tgju_v5_cache_day", todayTehranDay)
+        editor.apply()
+    }
+
+    private fun saveItemIfFresh(
+        editor: android.content.SharedPreferences.Editor,
+        prefix: String,
+        item: MarketRateItem?,
+        todayTehranDay: String
+    ) {
         item ?: return
+        val existingDay = prefs.getString("${prefix}_tehran_day", "") ?: ""
+        val existingTs = prefs.getLong("${prefix}_source_ts", 0L)
+        if (!shouldAcceptIncomingRate(existingDay, existingTs, item, todayTehranDay)) {
+            return
+        }
+        val effectiveDay = item.sourceTehranDay.takeIf { it.isNotBlank() } ?: todayTehranDay
         editor.putLong("${prefix}_price", item.priceTomans)
         editor.putLong("${prefix}_diff", item.changeTomans)
         editor.putFloat("${prefix}_pct", item.changePercent.toFloat())
@@ -212,6 +327,8 @@ class MarketRatesService(private val context: Context) {
         editor.putString("${prefix}_price_str", item.displayPriceFormatted ?: "")
         editor.putString("${prefix}_diff_str", item.displayDiffFormatted ?: "")
         editor.putString("${prefix}_time", item.timeFormatted)
+        editor.putLong("${prefix}_source_ts", item.sourceTimestampMs)
+        editor.putString("${prefix}_tehran_day", effectiveDay)
     }
 
     private fun loadItem(
@@ -219,8 +336,29 @@ class MarketRatesService(private val context: Context) {
         key: String,
         title: String,
         unitLabel: String,
+        todayTehranDay: String,
         sourceLabel: String = TGJU_SOURCE_LABEL
     ): MarketRateItem {
+        val savedDay = prefs.getString("${prefix}_tehran_day", "") ?: ""
+        // Strictly reject previous-day cached prices so yesterday's rate is never shown
+        if (savedDay != todayTehranDay) {
+            return MarketRateItem(
+                key = key,
+                title = title,
+                priceTomans = 0L,
+                changePercent = 0.0,
+                changeTomans = 0L,
+                isPositiveChange = true,
+                timeFormatted = "",
+                unitLabel = unitLabel,
+                displayPriceFormatted = null,
+                displayDiffFormatted = null,
+                sourceLabel = sourceLabel,
+                sourceTimestampMs = 0L,
+                sourceTehranDay = ""
+            )
+        }
+
         val price = prefs.getLong("${prefix}_price", 0L)
         val diff = prefs.getLong("${prefix}_diff", 0L)
         val pct = prefs.getFloat("${prefix}_pct", 0f).toDouble()
@@ -228,6 +366,7 @@ class MarketRatesService(private val context: Context) {
         val priceStr = prefs.getString("${prefix}_price_str", "")?.takeIf { it.isNotBlank() }
         val diffStr = prefs.getString("${prefix}_diff_str", "")?.takeIf { it.isNotBlank() }
         val timeStr = prefs.getString("${prefix}_time", "") ?: ""
+        val sourceTs = prefs.getLong("${prefix}_source_ts", 0L)
 
         return MarketRateItem(
             key = key,
@@ -240,44 +379,54 @@ class MarketRatesService(private val context: Context) {
             unitLabel = unitLabel,
             displayPriceFormatted = priceStr,
             displayDiffFormatted = diffStr,
-            sourceLabel = sourceLabel
+            sourceLabel = sourceLabel,
+            sourceTimestampMs = sourceTs,
+            sourceTehranDay = savedDay
         )
     }
 
     private fun saveAllTgjuRates(rates: TgjuExtractedRates, fetchedAtMs: Long) {
+        val todayTehranDay = getTehranShamsiDay(fetchedAtMs)
+        purgePreviousDayCacheIfNeeded(todayTehranDay)
         val shamsiUpdate = formatExactRefreshTimestamp(fetchedAtMs)
         prefs.edit().apply {
-            saveItem(this, "tgju_v5_dollar", rates.dollar)
-            saveItem(this, "tgju_v5_euro", rates.euro)
-            saveItem(this, "tgju_v6_retail_sekee", rates.sekehEmami)
-            saveItem(this, "tgju_v6_retail_rob", rates.robSekeh)
-            saveItem(this, "tgju_v5_ons", rates.goldOunce)
-            saveItem(this, "tgju_v5_gold18", rates.gold18k)
-            saveItem(this, "tgju_v5_btc", rates.bitcoin)
-            saveItem(this, "nobitex_v1_tether", rates.tether)
-            saveItem(this, "nobitex_v2_gram_usd", rates.gram)
-            saveItem(this, "tgju_v5_oil", rates.crudeOil)
+            saveItemIfFresh(this, "tgju_v5_dollar", rates.dollar, todayTehranDay)
+            saveItemIfFresh(this, "tgju_v5_euro", rates.euro, todayTehranDay)
+            saveItemIfFresh(this, "tgju_v6_retail_sekee", rates.sekehEmami, todayTehranDay)
+            saveItemIfFresh(this, "tgju_v6_retail_rob", rates.robSekeh, todayTehranDay)
+            saveItemIfFresh(this, "tgju_v5_ons", rates.goldOunce, todayTehranDay)
+            saveItemIfFresh(this, "tgju_v5_gold18", rates.gold18k, todayTehranDay)
+            saveItemIfFresh(this, "tgju_v5_btc", rates.bitcoin, todayTehranDay)
+            saveItemIfFresh(this, "nobitex_v1_tether", rates.tether, todayTehranDay)
+            saveItemIfFresh(this, "nobitex_v2_gram_usd", rates.gram, todayTehranDay)
+            saveItemIfFresh(this, "tgju_v5_oil", rates.crudeOil, todayTehranDay)
             putString("tgju_v5_last_update", shamsiUpdate)
+            putString("tgju_v5_cache_day", todayTehranDay)
             apply()
         }
     }
 
     private fun buildCurrentState(errorMessage: String? = null): MarketRatesState {
-        val lastUpdate = prefs.getString("tgju_v5_last_update", "")?.takeIf { it.isNotBlank() } ?: ""
+        val todayTehranDay = getTehranShamsiDay()
+        val cacheDay = prefs.getString("tgju_v5_cache_day", "") ?: ""
+        val lastUpdate = if (cacheDay == todayTehranDay) {
+            prefs.getString("tgju_v5_last_update", "")?.takeIf { it.isNotBlank() } ?: ""
+        } else ""
 
         return MarketRatesState(
-            dollar = loadItem("tgju_v5_dollar", "price_dollar_rl", "دلار", "تومان"),
-            euro = loadItem("tgju_v5_euro", "price_eur", "یورو", "تومان"),
-            sekehEmami = loadItem("tgju_v6_retail_sekee", "retail_sekee", "سکه امامی (تک‌فروشی)", "تومان"),
-            robSekeh = loadItem("tgju_v6_retail_rob", "retail_rob", "ربع سکه (تک‌فروشی)", "تومان"),
-            goldOunce = loadItem("tgju_v5_ons", "ons", "انس جهانی طلا", "دلار"),
-            gold18k = loadItem("tgju_v5_gold18", "geram18", "طلای 18 عیار", "تومان"),
-            bitcoin = loadItem("tgju_v5_btc", "crypto-bitcoin", "بیت‌کوین", "دلار"),
+            dollar = loadItem("tgju_v5_dollar", "price_dollar_rl", "دلار", "تومان", todayTehranDay),
+            euro = loadItem("tgju_v5_euro", "price_eur", "یورو", "تومان", todayTehranDay),
+            sekehEmami = loadItem("tgju_v6_retail_sekee", "retail_sekee", "سکه امامی (تک‌فروشی)", "تومان", todayTehranDay),
+            robSekeh = loadItem("tgju_v6_retail_rob", "retail_rob", "ربع سکه (تک‌فروشی)", "تومان", todayTehranDay),
+            goldOunce = loadItem("tgju_v5_ons", "ons", "انس جهانی طلا", "دلار", todayTehranDay),
+            gold18k = loadItem("tgju_v5_gold18", "geram18", "طلای 18 عیار", "تومان", todayTehranDay),
+            bitcoin = loadItem("tgju_v5_btc", "crypto-bitcoin", "بیت‌کوین", "دلار", todayTehranDay),
             tether = loadItem(
                 prefix = "nobitex_v1_tether",
                 key = "nobitex-usdt",
                 title = "تتر (USDT)",
                 unitLabel = "تومان",
+                todayTehranDay = todayTehranDay,
                 sourceLabel = NobitexMarketService.SOURCE_LABEL
             ),
             gram = loadItem(
@@ -285,9 +434,10 @@ class MarketRatesService(private val context: Context) {
                 key = "nobitex-gram",
                 title = "گرام (GRAM)",
                 unitLabel = "دلار",
+                todayTehranDay = todayTehranDay,
                 sourceLabel = NobitexMarketService.SOURCE_LABEL
             ),
-            crudeOil = loadItem("tgju_v5_oil", "oil_brent", "نفت برنت", "دلار"),
+            crudeOil = loadItem("tgju_v5_oil", "oil_brent", "نفت برنت", "دلار", todayTehranDay),
             lastUpdateTime = lastUpdate,
             isLoading = false,
             isTetherRefreshing = false,
@@ -300,24 +450,32 @@ class MarketRatesService(private val context: Context) {
         val url = URL(urlString)
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 14000
-            readTimeout = 14000
+            connectTimeout = 12000
+            readTimeout = 12000
             instanceFollowRedirects = true
             useCaches = false
-            setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
+            defaultUseCaches = false
+            setRequestProperty("Cache-Control", "no-cache, no-store, max-age=0, must-revalidate")
             setRequestProperty("Pragma", "no-cache")
+            setRequestProperty("Expires", "0")
+            setRequestProperty("Connection", "close")
             setRequestProperty(
                 "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
             )
             setRequestProperty("Referer", referer)
             setRequestProperty("Accept-Language", "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7")
-            setRequestProperty("Accept", "text/html,application/json,text/plain,*/*")
+            setRequestProperty("Accept", "application/json,text/html,text/plain,*/*")
         }
-        if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-            return null
+        return try {
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                null
+            } else {
+                connection.inputStream.bufferedReader().use { it.readText() }
+            }
+        } finally {
+            runCatching { connection.disconnect() }
         }
-        return connection.inputStream.bufferedReader().use { it.readText() }
     }
 
     data class TgjuExtractedRates(
@@ -356,6 +514,61 @@ class MarketRatesService(private val context: Context) {
             gram = gram ?: other.gram,
             crudeOil = crudeOil ?: other.crudeOil
         )
+
+        fun filterOutPreviousDays(todayTehranDay: String): TgjuExtractedRates {
+            fun keep(item: MarketRateItem?): MarketRateItem? =
+                if (item == null || isFromPreviousDay(item.sourceTehranDay, todayTehranDay)) null else item
+            return TgjuExtractedRates(
+                dollar = keep(dollar),
+                euro = keep(euro),
+                sekehEmami = keep(sekehEmami),
+                robSekeh = keep(robSekeh),
+                goldOunce = keep(goldOunce),
+                gold18k = keep(gold18k),
+                bitcoin = keep(bitcoin),
+                tether = keep(tether),
+                gram = keep(gram),
+                crudeOil = keep(crudeOil)
+            )
+        }
+
+        fun mergeFresher(other: TgjuExtractedRates, todayTehranDay: String): TgjuExtractedRates = TgjuExtractedRates(
+            dollar = pickFresherRate(dollar, other.dollar, todayTehranDay),
+            euro = pickFresherRate(euro, other.euro, todayTehranDay),
+            sekehEmami = pickFresherRate(sekehEmami, other.sekehEmami, todayTehranDay),
+            robSekeh = pickFresherRate(robSekeh, other.robSekeh, todayTehranDay),
+            goldOunce = pickFresherRate(goldOunce, other.goldOunce, todayTehranDay),
+            gold18k = pickFresherRate(gold18k, other.gold18k, todayTehranDay),
+            bitcoin = pickFresherRate(bitcoin, other.bitcoin, todayTehranDay),
+            tether = pickFresherRate(tether, other.tether, todayTehranDay),
+            gram = pickFresherRate(gram, other.gram, todayTehranDay),
+            crudeOil = pickFresherRate(crudeOil, other.crudeOil, todayTehranDay)
+        )
+
+        fun mergeMissingOrStale(
+            other: TgjuExtractedRates,
+            nowMs: Long,
+            todayTehranDay: String
+        ): TgjuExtractedRates {
+            fun resolve(cur: MarketRateItem?, cand: MarketRateItem?): MarketRateItem? {
+                if (cand == null || isFromPreviousDay(cand.sourceTehranDay, todayTehranDay)) return cur
+                if (cur == null) return cand
+                val curAgeMs = if (cur.sourceTimestampMs > 0L) nowMs - cur.sourceTimestampMs else Long.MAX_VALUE
+                return if (curAgeMs > 120_000L) cand else cur
+            }
+            return TgjuExtractedRates(
+                dollar = resolve(dollar, other.dollar),
+                euro = resolve(euro, other.euro),
+                sekehEmami = resolve(sekehEmami, other.sekehEmami),
+                robSekeh = resolve(robSekeh, other.robSekeh),
+                goldOunce = resolve(goldOunce, other.goldOunce),
+                gold18k = resolve(gold18k, other.gold18k),
+                bitcoin = resolve(bitcoin, other.bitcoin),
+                tether = resolve(tether, other.tether),
+                gram = resolve(gram, other.gram),
+                crudeOil = resolve(crudeOil, other.crudeOil)
+            )
+        }
 
         fun missingWidgetKeys(): List<String> = buildList {
             if (dollar == null) add("price_dollar_rl")
@@ -397,14 +610,177 @@ class MarketRatesService(private val context: Context) {
         const val TGJU_SOURCE_LABEL = "TGJU (tgju.org/coin)"
         const val TGJU_GRAM_SOURCE_LABEL = "TGJU (tgju.org/profile/crypto-gram)"
 
+        private val TEHRAN_TZ: TimeZone = TimeZone.getTimeZone("Asia/Tehran")
+        private val ALL_CACHE_PREFIXES = listOf(
+            "tgju_v5_dollar", "tgju_v5_euro", "tgju_v6_retail_sekee", "tgju_v6_retail_rob",
+            "tgju_v5_ons", "tgju_v5_gold18", "tgju_v5_btc", "nobitex_v1_tether",
+            "nobitex_v2_gram_usd", "tgju_v5_oil"
+        )
+
         private val HTML_TAG_REGEX = Regex("<[^>]*>")
         private val PERCENT_REGEX = Regex("""\(?([+-]?\d+(?:\.\d+)?)\s*%\)?""")
         private val NUMBER_REGEX = Regex("""[+-]?\d[\d,]*(?:\.\d+)?""")
 
         /**
+         * Returns today's Solar Hijri (Shamsi) date ("YYYY/MM/DD") in Iran Standard Time (Asia/Tehran).
+         */
+        fun getTehranShamsiDay(epochMs: Long = System.currentTimeMillis()): String {
+            val cal = Calendar.getInstance(TEHRAN_TZ).apply { timeInMillis = epochMs }
+            return PersianDateHelper.gregorianToJalali(
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH) + 1,
+                cal.get(Calendar.DAY_OF_MONTH)
+            ).format()
+        }
+
+        /**
+         * Returns true when a rate's Tehran Shamsi date string is strictly older than today.
+         */
+        fun isFromPreviousDay(sourceTehranDay: String, todayTehranDay: String): Boolean {
+            val clean = PersianDateHelper.toEnglishDigits(sourceTehranDay).trim()
+            if (clean.isBlank() || todayTehranDay.isBlank()) return false
+            return clean < todayTehranDay
+        }
+
+        /**
+         * Guards cache updates against yesterday's prices (e.g. after 17:00 IRST) and lagging CDN mirrors.
+         */
+        fun shouldAcceptIncomingRate(
+            existingDay: String,
+            existingTsMs: Long,
+            incoming: MarketRateItem,
+            todayTehranDay: String
+        ): Boolean {
+            if (isFromPreviousDay(incoming.sourceTehranDay, todayTehranDay)) {
+                return false
+            }
+            if (existingDay == todayTehranDay && existingTsMs > 0L &&
+                incoming.sourceTimestampMs > 0L && incoming.sourceTimestampMs < existingTsMs
+            ) {
+                return false
+            }
+            return true
+        }
+
+        /**
+         * Selects the fresher of two MarketRateItem candidates for today, rejecting any previous-day rate.
+         */
+        fun pickFresherRate(
+            current: MarketRateItem?,
+            candidate: MarketRateItem?,
+            todayTehranDay: String
+        ): MarketRateItem? {
+            val validCur = current?.takeUnless { isFromPreviousDay(it.sourceTehranDay, todayTehranDay) }
+            val validCand = candidate?.takeUnless { isFromPreviousDay(it.sourceTehranDay, todayTehranDay) }
+            if (validCur == null) return validCand
+            if (validCand == null) return validCur
+            return when {
+                validCand.sourceTimestampMs > validCur.sourceTimestampMs -> validCand
+                validCur.sourceTimestampMs > validCand.sourceTimestampMs -> validCur
+                else -> validCur
+            }
+        }
+
+        /**
+         * Parses TGJU's per-item timestamp (`ts` / `updated_at` Gregorian datetime and/or `t` Shamsi date or HH:mm:ss)
+         * into `(epochMs, tehranShamsiDay)`.
+         */
+        fun parseTgjuItemTimestamp(
+            tsRaw: String?,
+            tRaw: String?,
+            nowMs: Long = System.currentTimeMillis()
+        ): Pair<Long, String> {
+            val todayTehran = getTehranShamsiDay(nowMs)
+
+            // 1. Check `ts` / `updated_at` (e.g. "2026-11-25 14:25:10" or "2026-11-25T14:25:10")
+            val cleanTs = PersianDateHelper.toEnglishDigits(tsRaw.orEmpty()).trim().replace('T', ' ')
+            val dateTimeMatch = Regex("""(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?""")
+                .find(cleanTs)
+            if (dateTimeMatch != null) {
+                val y = dateTimeMatch.groupValues[1].toIntOrNull() ?: 0
+                val m = dateTimeMatch.groupValues[2].toIntOrNull() ?: 0
+                val d = dateTimeMatch.groupValues[3].toIntOrNull() ?: 0
+                val hh = dateTimeMatch.groupValues[4].toIntOrNull() ?: 12
+                val mm = dateTimeMatch.groupValues[5].toIntOrNull() ?: 0
+                val ss = dateTimeMatch.groupValues[6].toIntOrNull() ?: 0
+
+                if (y in 1900..2100 && m in 1..12 && d in 1..31) {
+                    val cal = Calendar.getInstance(TEHRAN_TZ).apply {
+                        set(Calendar.YEAR, y)
+                        set(Calendar.MONTH, m - 1)
+                        set(Calendar.DAY_OF_MONTH, d)
+                        set(Calendar.HOUR_OF_DAY, hh.coerceIn(0, 23))
+                        set(Calendar.MINUTE, mm.coerceIn(0, 59))
+                        set(Calendar.SECOND, ss.coerceIn(0, 59))
+                        set(Calendar.MILLISECOND, 0)
+                    }
+                    val shamsi = PersianDateHelper.gregorianToJalali(y, m, d).format()
+                    return Pair(cal.timeInMillis, shamsi)
+                } else if (y in 1300..1500 && m in 1..12 && d in 1..31) {
+                    val (gy, gm, gd) = PersianDateHelper.jalaliToGregorian(y, m, d)
+                    val cal = Calendar.getInstance(TEHRAN_TZ).apply {
+                        set(Calendar.YEAR, gy)
+                        set(Calendar.MONTH, gm - 1)
+                        set(Calendar.DAY_OF_MONTH, gd)
+                        set(Calendar.HOUR_OF_DAY, hh.coerceIn(0, 23))
+                        set(Calendar.MINUTE, mm.coerceIn(0, 59))
+                        set(Calendar.SECOND, ss.coerceIn(0, 59))
+                        set(Calendar.MILLISECOND, 0)
+                    }
+                    val shamsi = "%04d/%02d/%02d".format(Locale.US, y, m, d)
+                    return Pair(cal.timeInMillis, shamsi)
+                }
+            }
+
+            // 2. Check `t` field: TGJU puts Shamsi date (e.g. "1405/09/03") when NOT updated today,
+            //    and puts clock time ("14:25:10") when updated today!
+            val cleanT = PersianDateHelper.toEnglishDigits(tRaw.orEmpty()).trim()
+            val shamsiDateMatch = Regex("""(1[34]\d{2})/(\d{1,2})/(\d{1,2})""").find(cleanT)
+            if (shamsiDateMatch != null) {
+                val jy = shamsiDateMatch.groupValues[1].toIntOrNull() ?: 0
+                val jm = shamsiDateMatch.groupValues[2].toIntOrNull() ?: 0
+                val jd = shamsiDateMatch.groupValues[3].toIntOrNull() ?: 0
+                if (jy in 1300..1500 && jm in 1..12 && jd in 1..31) {
+                    val (gy, gm, gd) = PersianDateHelper.jalaliToGregorian(jy, jm, jd)
+                    val cal = Calendar.getInstance(TEHRAN_TZ).apply {
+                        set(Calendar.YEAR, gy)
+                        set(Calendar.MONTH, gm - 1)
+                        set(Calendar.DAY_OF_MONTH, gd)
+                        set(Calendar.HOUR_OF_DAY, 17)
+                        set(Calendar.MINUTE, 0)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }
+                    val shamsi = "%04d/%02d/%02d".format(Locale.US, jy, jm, jd)
+                    return Pair(cal.timeInMillis, shamsi)
+                }
+            }
+
+            val timeOnlyMatch = Regex("""(\d{1,2}):(\d{2})(?::(\d{2}))?""").find(cleanT)
+            if (timeOnlyMatch != null) {
+                val hh = timeOnlyMatch.groupValues[1].toIntOrNull() ?: 0
+                val mm = timeOnlyMatch.groupValues[2].toIntOrNull() ?: 0
+                val ss = timeOnlyMatch.groupValues[3].toIntOrNull() ?: 0
+                val cal = Calendar.getInstance(TEHRAN_TZ).apply {
+                    timeInMillis = nowMs
+                    set(Calendar.HOUR_OF_DAY, hh.coerceIn(0, 23))
+                    set(Calendar.MINUTE, mm.coerceIn(0, 59))
+                    set(Calendar.SECOND, ss.coerceIn(0, 59))
+                    set(Calendar.MILLISECOND, 0)
+                }
+                return Pair(cal.timeInMillis, todayTehran)
+            }
+
+            return Pair(0L, "")
+        }
+
+        /**
          * Parses all 10 market items from TGJU's live ticker JSON feed (`call.tgju.org/ajax.json`).
          */
-        fun parseAllFromTgjuAjaxJson(jsonText: String): Pair<TgjuExtractedRates, String> {
+        fun parseAllFromTgjuAjaxJson(
+            jsonText: String,
+            nowMs: Long = System.currentTimeMillis()
+        ): Pair<TgjuExtractedRates, String> {
             val root = JSONObject(jsonText)
             val current = root.optJSONObject("current") ?: return Pair(TgjuExtractedRates(), "")
 
@@ -432,16 +808,16 @@ class MarketRatesService(private val context: Context) {
             ).firstNotNullOfOrNull { it.optString("ts", "").takeIf { s -> s.isNotBlank() } } ?: ""
 
             val rates = TgjuExtractedRates(
-                dollar = dollarObj?.let { buildItemFromJson(it, "price_dollar_rl", "دلار", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0) },
-                euro = euroObj?.let { buildItemFromJson(it, "price_eur", "یورو", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0) },
-                sekehEmami = sekeeObj?.let { buildItemFromJson(it, "retail_sekee", "سکه امامی (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 1_000_000.0) },
-                robSekeh = robObj?.let { buildItemFromJson(it, "retail_rob", "ربع سکه (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 500_000.0) },
-                goldOunce = onsObj?.let { buildItemFromJson(it, "ons", "انس جهانی طلا", TgjuValueMode.USD_DECIMAL, minPrice = 500.0) },
-                gold18k = gold18Obj?.let { buildItemFromJson(it, "geram18", "طلای 18 عیار", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 100_000.0) },
-                bitcoin = btcObj?.let { buildItemFromJson(it, "crypto-bitcoin", "بیت‌کوین", TgjuValueMode.USD_WHOLE, minPrice = 1_000.0) },
-                tether = tetherObj?.let { buildItemFromJson(it, "crypto-tether-irr", "تتر (USDT)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0) },
-                gram = gramObj?.let { buildItemFromJson(it, "crypto-gram", "گرام (GRAM)", TgjuValueMode.USD_CRYPTO_PRECISE, minPrice = 0.000001) },
-                crudeOil = oilObj?.let { buildItemFromJson(it, "oil_brent", "نفت برنت", TgjuValueMode.USD_DECIMAL, minPrice = 10.0) }
+                dollar = dollarObj?.let { buildItemFromJson(it, "price_dollar_rl", "دلار", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0, nowMs = nowMs) },
+                euro = euroObj?.let { buildItemFromJson(it, "price_eur", "یورو", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0, nowMs = nowMs) },
+                sekehEmami = sekeeObj?.let { buildItemFromJson(it, "retail_sekee", "سکه امامی (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 1_000_000.0, nowMs = nowMs) },
+                robSekeh = robObj?.let { buildItemFromJson(it, "retail_rob", "ربع سکه (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 500_000.0, nowMs = nowMs) },
+                goldOunce = onsObj?.let { buildItemFromJson(it, "ons", "انس جهانی طلا", TgjuValueMode.USD_DECIMAL, minPrice = 500.0, nowMs = nowMs) },
+                gold18k = gold18Obj?.let { buildItemFromJson(it, "geram18", "طلای 18 عیار", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 100_000.0, nowMs = nowMs) },
+                bitcoin = btcObj?.let { buildItemFromJson(it, "crypto-bitcoin", "بیت‌کوین", TgjuValueMode.USD_WHOLE, minPrice = 1_000.0, nowMs = nowMs) },
+                tether = tetherObj?.let { buildItemFromJson(it, "crypto-tether-irr", "تتر (USDT)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0, nowMs = nowMs) },
+                gram = gramObj?.let { buildItemFromJson(it, "crypto-gram", "گرام (GRAM)", TgjuValueMode.USD_CRYPTO_PRECISE, minPrice = 0.000001, nowMs = nowMs) },
+                crudeOil = oilObj?.let { buildItemFromJson(it, "oil_brent", "نفت برنت", TgjuValueMode.USD_DECIMAL, minPrice = 10.0, nowMs = nowMs) }
             )
             return Pair(rates, timestamp)
         }
@@ -449,7 +825,10 @@ class MarketRatesService(private val context: Context) {
         /**
          * Parses all available market items from TGJU's live widget endpoint (`api.tgju.org/v1/widget/tmp`).
          */
-        fun parseAllFromTgjuWidgetJson(widgetJson: String): Pair<TgjuExtractedRates, String> {
+        fun parseAllFromTgjuWidgetJson(
+            widgetJson: String,
+            nowMs: Long = System.currentTimeMillis()
+        ): Pair<TgjuExtractedRates, String> {
             val indicators = JSONObject(widgetJson)
                 .optJSONObject("response")
                 ?.optJSONArray("indicators")
@@ -475,34 +854,34 @@ class MarketRatesService(private val context: Context) {
 
                 when (name) {
                     "price_dollar_rl" -> if (dollar == null) {
-                        dollar = buildItemFromJson(obj, "price_dollar_rl", "دلار", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0)
+                        dollar = buildItemFromJson(obj, "price_dollar_rl", "دلار", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0, nowMs = nowMs)
                     }
                     "price_eur" -> if (euro == null) {
-                        euro = buildItemFromJson(obj, "price_eur", "یورو", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0)
+                        euro = buildItemFromJson(obj, "price_eur", "یورو", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0, nowMs = nowMs)
                     }
                     "retail_sekee", "sekee" -> if (sekee == null || name == "retail_sekee") {
-                        buildItemFromJson(obj, "retail_sekee", "سکه امامی (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 1_000_000.0)?.let { sekee = it }
+                        buildItemFromJson(obj, "retail_sekee", "سکه امامی (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 1_000_000.0, nowMs = nowMs)?.let { sekee = it }
                     }
                     "retail_rob", "rob" -> if (rob == null || name == "retail_rob") {
-                        buildItemFromJson(obj, "retail_rob", "ربع سکه (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 500_000.0)?.let { rob = it }
+                        buildItemFromJson(obj, "retail_rob", "ربع سکه (تک‌فروشی)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 500_000.0, nowMs = nowMs)?.let { rob = it }
                     }
                     "ons" -> if (ons == null) {
-                        ons = buildItemFromJson(obj, "ons", "انس جهانی طلا", TgjuValueMode.USD_DECIMAL, minPrice = 500.0)
+                        ons = buildItemFromJson(obj, "ons", "انس جهانی طلا", TgjuValueMode.USD_DECIMAL, minPrice = 500.0, nowMs = nowMs)
                     }
                     "geram18" -> if (gold18 == null) {
-                        gold18 = buildItemFromJson(obj, "geram18", "طلای 18 عیار", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 100_000.0)
+                        gold18 = buildItemFromJson(obj, "geram18", "طلای 18 عیار", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 100_000.0, nowMs = nowMs)
                     }
                     "crypto-bitcoin", "crypto-bitcoin-usd", "bitcoin" -> if (btc == null) {
-                        btc = buildItemFromJson(obj, "crypto-bitcoin", "بیت‌کوین", TgjuValueMode.USD_WHOLE, minPrice = 1_000.0)
+                        btc = buildItemFromJson(obj, "crypto-bitcoin", "بیت‌کوین", TgjuValueMode.USD_WHOLE, minPrice = 1_000.0, nowMs = nowMs)
                     }
                     "crypto-tether-irr" -> if (tether == null) {
-                        tether = buildItemFromJson(obj, "crypto-tether-irr", "تتر (USDT)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0)
+                        tether = buildItemFromJson(obj, "crypto-tether-irr", "تتر (USDT)", TgjuValueMode.RIAL_TO_TOMAN, minPrice = 10_000.0, nowMs = nowMs)
                     }
                     "crypto-gram", "crypto-gram-usd", "gram", "crypto-toncoin" -> if (gram == null || name == "crypto-gram") {
-                        buildItemFromJson(obj, "crypto-gram", "گرام (GRAM)", TgjuValueMode.USD_CRYPTO_PRECISE, minPrice = 0.000001)?.let { gram = it }
+                        buildItemFromJson(obj, "crypto-gram", "گرام (GRAM)", TgjuValueMode.USD_CRYPTO_PRECISE, minPrice = 0.000001, nowMs = nowMs)?.let { gram = it }
                     }
                     "oil_brent", "oil" -> if (oil == null || name == "oil_brent") {
-                        buildItemFromJson(obj, "oil_brent", "نفت برنت", TgjuValueMode.USD_DECIMAL, minPrice = 10.0)?.let { oil = it }
+                        buildItemFromJson(obj, "oil_brent", "نفت برنت", TgjuValueMode.USD_DECIMAL, minPrice = 10.0, nowMs = nowMs)?.let { oil = it }
                     }
                 }
             }
@@ -527,7 +906,11 @@ class MarketRatesService(private val context: Context) {
         /**
          * Extracts ALL available market rates directly from https://www.tgju.org/coin HTML.
          */
-        fun parseAllFromTgjuCoinHtml(html: String): TgjuExtractedRates {
+        fun parseAllFromTgjuCoinHtml(
+            html: String,
+            nowMs: Long = System.currentTimeMillis(),
+            todayTehranDay: String = getTehranShamsiDay(nowMs)
+        ): TgjuExtractedRates {
             val dollar = extractRowFromTgjuHtml(
                 html,
                 listOf("id=\"l-price_dollar_rl\"", "data-market-row=\"price_dollar_rl\"", "l-price_dollar_rl")
@@ -611,17 +994,23 @@ class MarketRatesService(private val context: Context) {
                 } else null
             }
 
+            fun stampHtml(item: MarketRateItem?): MarketRateItem? =
+                item?.copy(
+                    sourceTimestampMs = if (item.sourceTimestampMs > 0L) item.sourceTimestampMs else nowMs,
+                    sourceTehranDay = item.sourceTehranDay.ifBlank { todayTehranDay }
+                )
+
             return TgjuExtractedRates(
-                dollar = dollar,
-                euro = euro,
-                sekehEmami = sekee,
-                robSekeh = rob,
-                goldOunce = ons,
-                gold18k = gold18,
-                bitcoin = btc,
-                tether = tether,
-                gram = gram,
-                crudeOil = oil
+                dollar = stampHtml(dollar),
+                euro = stampHtml(euro),
+                sekehEmami = stampHtml(sekee),
+                robSekeh = stampHtml(rob),
+                goldOunce = stampHtml(ons),
+                gold18k = stampHtml(gold18),
+                bitcoin = stampHtml(btc),
+                tether = stampHtml(tether),
+                gram = stampHtml(gram),
+                crudeOil = stampHtml(oil)
             )
         }
 
@@ -693,7 +1082,8 @@ class MarketRatesService(private val context: Context) {
             key: String,
             title: String,
             mode: TgjuValueMode,
-            minPrice: Double = 0.0
+            minPrice: Double = 0.0,
+            nowMs: Long = System.currentTimeMillis()
         ): MarketRateItem? {
             val pDouble = parseCleanDouble(obj.optString("p", "")) ?: return null
             if (pDouble <= 0.0 || pDouble < minPrice) return null
@@ -715,6 +1105,10 @@ class MarketRatesService(private val context: Context) {
                 absD = pDouble * (absDp / 100.0)
             }
 
+            val tsRaw = obj.optString("ts", obj.optString("updated_at", ""))
+            val tRaw = obj.optString("t", "")
+            val (parsedTsMs, parsedDay) = parseTgjuItemTimestamp(tsRaw, tRaw, nowMs)
+
             val rawRow = TgjuRawRow(
                 price = pDouble,
                 changeAmount = absD,
@@ -727,7 +1121,9 @@ class MarketRatesService(private val context: Context) {
                 title = title,
                 mode = mode,
                 minPrice = minPrice,
-                timeFormatted = obj.optString("t", "")
+                timeFormatted = tRaw,
+                sourceTimestampMs = parsedTsMs,
+                sourceTehranDay = parsedDay
             )
         }
 
@@ -737,7 +1133,9 @@ class MarketRatesService(private val context: Context) {
             title: String,
             mode: TgjuValueMode,
             minPrice: Double = 0.0,
-            timeFormatted: String = ""
+            timeFormatted: String = "",
+            sourceTimestampMs: Long = 0L,
+            sourceTehranDay: String = ""
         ): MarketRateItem? {
             if (raw.price <= 0.0 || raw.price < minPrice) return null
             val absDp = abs(raw.changePercent)
@@ -764,7 +1162,9 @@ class MarketRatesService(private val context: Context) {
                         unitLabel = "تومان",
                         displayPriceFormatted = null,
                         displayDiffFormatted = null,
-                        sourceLabel = TGJU_SOURCE_LABEL
+                        sourceLabel = TGJU_SOURCE_LABEL,
+                        sourceTimestampMs = sourceTimestampMs,
+                        sourceTehranDay = sourceTehranDay
                     )
                 }
 
@@ -782,7 +1182,9 @@ class MarketRatesService(private val context: Context) {
                         unitLabel = "دلار",
                         displayPriceFormatted = priceStr,
                         displayDiffFormatted = diffStr,
-                        sourceLabel = TGJU_SOURCE_LABEL
+                        sourceLabel = TGJU_SOURCE_LABEL,
+                        sourceTimestampMs = sourceTimestampMs,
+                        sourceTehranDay = sourceTehranDay
                     )
                 }
 
@@ -800,7 +1202,9 @@ class MarketRatesService(private val context: Context) {
                         unitLabel = "دلار",
                         displayPriceFormatted = priceStr,
                         displayDiffFormatted = diffStr,
-                        sourceLabel = TGJU_GRAM_SOURCE_LABEL
+                        sourceLabel = TGJU_GRAM_SOURCE_LABEL,
+                        sourceTimestampMs = sourceTimestampMs,
+                        sourceTehranDay = sourceTehranDay
                     )
                 }
 
@@ -820,7 +1224,9 @@ class MarketRatesService(private val context: Context) {
                         unitLabel = "دلار",
                         displayPriceFormatted = priceStr,
                         displayDiffFormatted = diffStr,
-                        sourceLabel = TGJU_SOURCE_LABEL
+                        sourceLabel = TGJU_SOURCE_LABEL,
+                        sourceTimestampMs = sourceTimestampMs,
+                        sourceTehranDay = sourceTehranDay
                     )
                 }
 
@@ -838,7 +1244,9 @@ class MarketRatesService(private val context: Context) {
                         unitLabel = "واحد",
                         displayPriceFormatted = PersianDateHelper.formatCurrency(pts, includeUnit = false),
                         displayDiffFormatted = if (diffPts > 0L) PersianDateHelper.formatCurrency(diffPts, includeUnit = false) else null,
-                        sourceLabel = TGJU_SOURCE_LABEL
+                        sourceLabel = TGJU_SOURCE_LABEL,
+                        sourceTimestampMs = sourceTimestampMs,
+                        sourceTehranDay = sourceTehranDay
                     )
                 }
             }

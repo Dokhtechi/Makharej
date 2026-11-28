@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -22,11 +23,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -40,6 +43,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.QueryStats
@@ -85,12 +89,14 @@ import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.EntertainmentScreen
 import com.example.ui.screens.MonthDetailScreen
 import com.example.ui.screens.NewsScreen
+import com.example.ui.screens.PriceSearchScreen
 import com.example.ui.screens.ReportsScreen
 import com.example.ui.screens.ReportsTabSection
 import com.example.ui.screens.ToolSection
 import com.example.ui.screens.ToolsScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.ExpenseViewModel
+import com.example.ui.viewmodel.PriceSearchViewModel
 import androidx.compose.material.icons.filled.Calculate
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -124,6 +130,7 @@ enum class ScreenTab(val title: String, val icon: ImageVector) {
     DASHBOARD("خانه", Icons.Default.Home),
     REPORTS("گزارش‌ها", Icons.Default.QueryStats),
     TOOLS("امکانات", Icons.Default.Calculate),
+    PRICE_SEARCH("جستجوی قیمت", Icons.Default.LocalOffer),
     NEWS("اخبار", Icons.Default.Newspaper),
     ENTERTAINMENT("سرگرمی", Icons.Default.SportsEsports)
 }
@@ -131,6 +138,7 @@ enum class ScreenTab(val title: String, val icon: ImageVector) {
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ExpenseViewModel by viewModels()
+    private val priceSearchViewModel: PriceSearchViewModel by viewModels()
     private val openStickyNotesTrigger = mutableStateOf(0)
 
     override fun onNewIntent(intent: Intent) {
@@ -178,6 +186,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     ExpenseTrackerApp(
                         viewModel = viewModel,
+                        priceSearchViewModel = priceSearchViewModel,
                         isDarkMode = isDarkMode,
                         onToggleTheme = { isDarkMode = !isDarkMode },
                         fontScale = fontScale,
@@ -200,6 +209,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun ExpenseTrackerApp(
     viewModel: ExpenseViewModel,
+    priceSearchViewModel: PriceSearchViewModel,
     isDarkMode: Boolean,
     onToggleTheme: () -> Unit,
     fontScale: Float = FontScaleHelper.DEFAULT_SCALE,
@@ -219,6 +229,11 @@ fun ExpenseTrackerApp(
     var reportsInitialSubTab by rememberSaveable { mutableStateOf(ReportsTabSection.FOLDER_REPORTS) }
     var toolsInitialSection by remember { mutableStateOf<ToolSection?>(null) }
 
+    // Hardware/gesture Back button returns to Home tab from any other tab; exits app only on Home tab
+    BackHandler(enabled = currentTab != ScreenTab.DASHBOARD) {
+        currentTab = ScreenTab.DASHBOARD
+    }
+
     LaunchedEffect(openStickyNotesSignal) {
         if (openStickyNotesSignal > 0) {
             toolsInitialSection = ToolSection.STICKY_NOTES
@@ -226,6 +241,7 @@ fun ExpenseTrackerApp(
         }
     }
     var isBottomBarCollapsed by rememberSaveable { mutableStateOf(false) }
+    val isImeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var showAddBottomSheet by remember { mutableStateOf(false) }
     var showVoiceExpenseDialog by remember { mutableStateOf(false) }
     var isAnnualPreselected by remember { mutableStateOf(false) }
@@ -331,7 +347,7 @@ fun ExpenseTrackerApp(
         },
         bottomBar = {
             AnimatedVisibility(
-                visible = !isBottomBarCollapsed,
+                visible = !isBottomBarCollapsed && !isImeVisible,
                 enter = slideInVertically(initialOffsetY = { it }) + expandVertically() + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { it }) + shrinkVertically() + fadeOut()
             ) {
@@ -404,6 +420,9 @@ fun ExpenseTrackerApp(
                                     .height(2.5.dp)
                                     .background(topHighlightBrush)
                             )
+                            // Strictly enforce RTL so tab order from right to left is always:
+                            // 1: خانه, 2: گزارش‌ها, 3: امکانات, 4: جستجوی قیمت, 5: اخبار, 6: سرگرمی
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                             androidx.compose.foundation.layout.Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -418,13 +437,14 @@ fun ExpenseTrackerApp(
                                 ScreenTab.DASHBOARD -> Color(0xFF10B981)     // Emerald
                                 ScreenTab.REPORTS -> Color(0xFF0EA5E9)       // Sky Cyan
                                 ScreenTab.TOOLS -> Color(0xFFF59E0B)         // Radiant Gold
+                                ScreenTab.PRICE_SEARCH -> Color(0xFF7C3AED)  // Electric Violet
                                 ScreenTab.NEWS -> Color(0xFFF43F5E)          // Coral Rose
                                 ScreenTab.ENTERTAINMENT -> Color(0xFF14B8A6) // Luminous Teal
                             }
                             val activeContentColor = if (tab == ScreenTab.TOOLS) Color(0xFF1E1B4B) else Color.White
                             val itemInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                             val navMinHeight = (54f * uiScale).coerceAtLeast(48f).dp
-                            val navIconSize = ((if (isSelected) 22f else 20f) * uiScale).coerceIn(17f, 26f).dp
+                            val navIconSize = ((if (isSelected) 22f else 19f) * uiScale).coerceIn(17f, 26f).dp
                             val navVerticalPad = (6f * uiScale).coerceIn(4f, 10f).dp
 
                             Box(
@@ -439,7 +459,7 @@ fun ExpenseTrackerApp(
                                                 .background(activePillColor)
                                                 .border(
                                                     1.2.dp,
-                                                    Color.White.copy(alpha = 0.75f),
+                                                    Color.White.copy(alpha = 0.82f),
                                                     androidx.compose.foundation.shape.RoundedCornerShape(14.dp)
                                                 )
                                         } else {
@@ -472,8 +492,8 @@ fun ExpenseTrackerApp(
                                     androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(3.dp))
                                     Text(
                                         text = tab.title,
-                                        fontSize = 9.5.sp,
-                                        lineHeight = 12.sp,
+                                        fontSize = 8.8.sp,
+                                        lineHeight = 11.sp,
                                         fontWeight = if (isSelected) FontWeight.Black else FontWeight.ExtraBold,
                                         color = if (isSelected) activeContentColor else Color.White,
                                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -483,51 +503,9 @@ fun ExpenseTrackerApp(
                             }
                         }
                     }
+                            }
                 }
             }
-                }
-            }
-        },
-        floatingActionButton = {
-            if (currentTab != ScreenTab.ENTERTAINMENT) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                SmallFloatingActionButton(
-                    onClick = { showVoiceExpenseDialog = true },
-                    containerColor = Color(0xFF0EA5E9),
-                    contentColor = Color.White,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .testTag("voice_expense_fab")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "ثبت صوتی هزینه",
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                FloatingActionButton(
-                    onClick = {
-                        editingExpense = null
-                        preselectedTitleForAdd = null
-                        preselectedAmountForAdd = null
-                        preselectedReceiptPathForAdd = null
-                        preselectedDateForAdd = PersianDateHelper.getShamsiDate().format()
-                        showAddBottomSheet = true
-                    },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.testTag("add_expense_fab")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "ثبت هزینه جدید",
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
                 }
             }
         }
@@ -614,11 +592,63 @@ fun ExpenseTrackerApp(
                         }
                     )
                 }
+                ScreenTab.PRICE_SEARCH -> {
+                    PriceSearchScreen(viewModel = priceSearchViewModel)
+                }
                 ScreenTab.NEWS -> {
                     NewsScreen(viewModel = viewModel)
                 }
                 ScreenTab.ENTERTAINMENT -> {
                     EntertainmentScreen(viewModel = viewModel)
+                }
+            }
+
+            // Voice & Add Expense FABs docked on physical bottom-LEFT (BottomEnd in RTL),
+            // positioned compactly side-by-side below the recent expenses card
+            if (!isImeVisible && currentTab != ScreenTab.ENTERTAINMENT && currentTab != ScreenTab.PRICE_SEARCH) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 14.dp, bottom = 10.dp)
+                ) {
+                    SmallFloatingActionButton(
+                        onClick = { showVoiceExpenseDialog = true },
+                        containerColor = Color(0xFF0EA5E9),
+                        contentColor = Color.White,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("voice_expense_fab")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "ثبت صوتی هزینه",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    FloatingActionButton(
+                        onClick = {
+                            editingExpense = null
+                            preselectedTitleForAdd = null
+                            preselectedAmountForAdd = null
+                            preselectedReceiptPathForAdd = null
+                            preselectedDateForAdd = PersianDateHelper.getShamsiDate().format()
+                            showAddBottomSheet = true
+                        },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier
+                            .size(52.dp)
+                            .testTag("add_expense_fab")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "ثبت هزینه جدید",
+                            modifier = Modifier.size(25.dp)
+                        )
+                    }
                 }
             }
 
@@ -663,6 +693,10 @@ fun ExpenseTrackerApp(
         VoiceExpenseDialog(
             onDismissRequest = { showVoiceExpenseDialog = false },
             onDirectSaveExpense = { parsed ->
+                com.example.ui.components.ExpenseSuggestionsStore.addSuggestionIfMissing(
+                    context = context,
+                    rawTitle = parsed.title
+                )
                 viewModel.addExpense(
                     title = parsed.title,
                     amount = parsed.amountTomans,

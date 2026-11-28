@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -85,15 +88,16 @@ fun DashboardScreen(
         CurrentMonthExpenseGrouper.groupExpenses(sortedCurrentMonthExpenses)
     }
     var expandedGroupKeys by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var isExpensesExpanded by rememberSaveable { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
             .testTag("dashboard_screen"),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = PaddingValues(top = 2.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item { Spacer(modifier = Modifier.height(4.dp)) }
 
         // 1. تقویم روز (شمس، میلادی، ساعت زنده)
         item {
@@ -187,109 +191,180 @@ fun DashboardScreen(
             }
         }
 
-        // Recent Expenses List (Grouped by expense title with expandable dropdown details)
+        // Recent Expenses List (Collapsible drawer, collapsed by default)
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "ریز هزینه‌های ماه جاری",
-                    fontSize = 15.5.sp,
-                    fontWeight = FontWeight.Black,
-                    color = appTextColor(MaterialTheme.colorScheme.onSurface),
-                    softWrap = true,
-                    modifier = Modifier.weight(1f)
-                )
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                val countLabel = if (groupedCurrentMonthExpenses.size == sortedCurrentMonthExpenses.size) {
-                    "${sortedCurrentMonthExpenses.size} مورد ثبت شده"
-                } else {
-                    "${groupedCurrentMonthExpenses.size} دسته (${sortedCurrentMonthExpenses.size} مورد)"
-                }
-
-                Text(
-                    text = enDigits(countLabel),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                    softWrap = true
-                )
+            val countLabel = if (groupedCurrentMonthExpenses.size == sortedCurrentMonthExpenses.size) {
+                "${sortedCurrentMonthExpenses.size} مورد ثبت شده"
+            } else {
+                "${groupedCurrentMonthExpenses.size} دسته (${sortedCurrentMonthExpenses.size} مورد)"
             }
-        }
 
-        if (groupedCurrentMonthExpenses.isEmpty()) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                border = BorderStroke(
+                    1.dp,
+                    if (isExpensesExpanded) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)
+                    }
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .testTag("toggle_recent_expenses_button")
+                    .clickable { isExpensesExpanded = !isExpensesExpanded }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.ReceiptLong,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.size(36.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "در این ماه هنوز هزینه‌ای ثبت نکرده‌اید",
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        TextButton(onClick = onAddExpenseClick) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("ثبت اولین هزینه", fontWeight = FontWeight.ExtraBold)
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.ReceiptLong,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "ریز هزینه‌های ماه جاری",
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.Black,
+                                color = appTextColor(MaterialTheme.colorScheme.onSurface),
+                                softWrap = true
+                            )
+                            Text(
+                                text = enDigits(countLabel),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
+                                softWrap = true
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isExpensesExpanded) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = if (isExpensesExpanded) "بستن" else "مشاهده",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isExpensesExpanded) Color.White else MaterialTheme.colorScheme.primary
+                            )
+                            Icon(
+                                imageVector = if (isExpensesExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isExpensesExpanded) "بستن ریز هزینه‌ها" else "باز کردن ریز هزینه‌ها",
+                                tint = if (isExpensesExpanded) Color.White else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
             }
-        } else {
-            items(
-                items = groupedCurrentMonthExpenses,
-                key = { group ->
-                    if (!group.isAnnual && group.items.size == 1) "single_${group.items.first().entity.id}" else "group_${group.groupKey}"
-                }
-            ) { group ->
-                if (!group.isAnnual && group.items.size == 1) {
-                    val singleItem = group.items.first()
-                    ExpenseItemCard(
-                        resolvedExpense = singleItem,
-                        onDeleteClick = { viewModel.deleteExpense(singleItem.entity) },
-                        onEditClick = { onEditExpense(singleItem.entity) }
-                    )
-                } else {
-                    val isExpanded = expandedGroupKeys.contains(group.groupKey)
-                    GroupedExpenseDropdownCard(
-                        group = group,
-                        isExpanded = isExpanded,
-                        onToggleExpand = {
-                            expandedGroupKeys = if (isExpanded) {
-                                expandedGroupKeys - group.groupKey
-                            } else {
-                                expandedGroupKeys + group.groupKey
+        }
+
+        if (isExpensesExpanded) {
+            if (groupedCurrentMonthExpenses.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ReceiptLong,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "در این ماه هنوز هزینه‌ای ثبت نکرده‌اید",
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            TextButton(onClick = onAddExpenseClick) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("ثبت اولین هزینه", fontWeight = FontWeight.ExtraBold)
                             }
-                        },
-                        onEditItem = onEditExpense,
-                        onDeleteItem = { entity -> viewModel.deleteExpense(entity) }
-                    )
+                        }
+                    }
+                }
+            } else {
+                items(
+                    items = groupedCurrentMonthExpenses,
+                    key = { group ->
+                        if (!group.isAnnual && group.items.size == 1) "single_${group.items.first().entity.id}" else "group_${group.groupKey}"
+                    }
+                ) { group ->
+                    if (!group.isAnnual && group.items.size == 1) {
+                        val singleItem = group.items.first()
+                        ExpenseItemCard(
+                            resolvedExpense = singleItem,
+                            onDeleteClick = { viewModel.deleteExpense(singleItem.entity) },
+                            onEditClick = { onEditExpense(singleItem.entity) }
+                        )
+                    } else {
+                        val isExpanded = expandedGroupKeys.contains(group.groupKey)
+                        GroupedExpenseDropdownCard(
+                            group = group,
+                            isExpanded = isExpanded,
+                            onToggleExpand = {
+                                expandedGroupKeys = if (isExpanded) {
+                                    expandedGroupKeys - group.groupKey
+                                } else {
+                                    expandedGroupKeys + group.groupKey
+                                }
+                            },
+                            onEditItem = onEditExpense,
+                            onDeleteItem = { entity -> viewModel.deleteExpense(entity) }
+                        )
+                    }
                 }
             }
         }
 
-        item { Spacer(modifier = Modifier.height(80.dp)) }
+        item { Spacer(modifier = Modifier.height(92.dp)) }
     }
 }
 

@@ -30,20 +30,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -92,7 +87,6 @@ fun NewsScreen(
     val newsError by viewModel.newsErrorMessage.collectAsStateWithLifecycle()
     val speechState by viewModel.newsSpeechState.collectAsStateWithLifecycle()
 
-    var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf(NewsCategory.ALL) }
     var selectedSource by remember { mutableStateOf<NewsSource?>(null) }
     var selectedArticleForDetail by remember { mutableStateOf<NewsArticle?>(null) }
@@ -116,16 +110,12 @@ fun NewsScreen(
         }
     }
 
-    // Filter news based on category, source, and search query
-    val filteredNews = remember(allNews, selectedCategory, selectedSource, searchQuery) {
+    // Filter news based on category and source
+    val filteredNews = remember(allNews, selectedCategory, selectedSource) {
         allNews.filter { article ->
             val matchCategory = selectedCategory == NewsCategory.ALL || article.category == selectedCategory
             val matchSource = selectedSource == null || article.source == selectedSource
-            val matchQuery = searchQuery.isBlank() ||
-                article.title.contains(searchQuery, ignoreCase = true) ||
-                article.summary.contains(searchQuery, ignoreCase = true)
-
-            matchCategory && matchSource && matchQuery
+            matchCategory && matchSource
         }
     }
 
@@ -184,11 +174,11 @@ fun NewsScreen(
     ) {
         item { Spacer(modifier = Modifier.height(4.dp)) }
 
-        // 1. Header Card with Live Status & Refresh
+        // 1. Compact Header Card with Live Status & Refresh
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                 ),
@@ -200,7 +190,7 @@ fun NewsScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(scaledDp(16.dp))
+                        .padding(horizontal = scaledDp(12.dp), vertical = scaledDp(10.dp))
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -214,14 +204,14 @@ fun NewsScreen(
                             Surface(
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(scaledDp(40.dp))
+                                modifier = Modifier.size(scaledDp(36.dp))
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Default.Newspaper,
                                         contentDescription = null,
                                         tint = Color.White,
-                                        modifier = Modifier.size(scaledDp(22.dp))
+                                        modifier = Modifier.size(scaledDp(20.dp))
                                     )
                                 }
                             }
@@ -229,18 +219,43 @@ fun NewsScreen(
                             Column {
                                 Text(
                                     text = "اخبار برگزیده روز",
-                                    fontSize = 17.5.sp,
+                                    fontSize = 16.sp,
                                     fontWeight = FontWeight.Black,
                                     color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer)
                                 )
-                                Text(
-                                    text = enDigits("8 پایگاه معتبر خبری و حوادث (رکنا، فرارو، خبرآنلاین، اقتصاد آنلاین، تابناک، زومیت، آفتاب، سهام نیوز)"),
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer),
-                                    lineHeight = 15.sp,
-                                    softWrap = true
-                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AccessTime,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = if (isLoading) "در حال دریافت..." else "به‌روزرسانی:",
+                                        fontSize = 11.sp,
+                                        color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer),
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                    if (!isLoading && lastUpdated.isNotBlank()) {
+                                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                            Text(
+                                                text = PersianDateHelper.toEnglishDigits(lastUpdated),
+                                                fontFamily = OutfitFontFamily,
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Black,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -288,44 +303,9 @@ fun NewsScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AccessTime,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = if (isLoading) "در حال دریافت تازه‌ترین اخبار..." else "آخرین به‌روزرسانی:",
-                            fontSize = 11.5.sp,
-                            color = appTextColor(MaterialTheme.colorScheme.onPrimaryContainer),
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                        if (!isLoading && lastUpdated.isNotBlank()) {
-                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                                Text(
-                                    text = PersianDateHelper.toEnglishDigits(lastUpdated),
-                                    fontFamily = OutfitFontFamily,
-                                    fontSize = 11.5.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Black,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        }
-                    }
-
                     // Distinct Tehran-Iranian Male & Female Voice Persona Picker (Online Streaming)
                     if (allNews.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -376,7 +356,7 @@ fun NewsScreen(
                     }
 
                     if (!newsError.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = Color(0xFFFEF2F2),
@@ -411,53 +391,11 @@ fun NewsScreen(
             }
         }
 
-        // 2. Search Field
+        // 3. Category Filter Chips (همه، حوادث، اقتصادی، سیاسی، تکنولوژی، علمی، فرهنگی، اجتماعی، سلامت)
         item {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("news_search_input"),
-                placeholder = {
-                    Text(
-                        "جستجو در تیترها و متون خبری...",
-                        fontSize = 13.sp,
-                        color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.7f)
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "جستجو",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotBlank()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(
-                                imageVector = Icons.Default.Clear,
-                                contentDescription = "پاک کردن",
-                                tint = MaterialTheme.colorScheme.outline
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                )
-            )
-        }
-
-        // 3. Category Filter Chips (همه، اقتصادی، سیاسی، تکنولوژی)
-        item {
+            val categoryCounts = remember(allNews) {
+                allNews.groupingBy { it.category }.eachCount()
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -467,6 +405,10 @@ fun NewsScreen(
             ) {
                 NewsCategory.values().forEach { category ->
                     val isSelected = selectedCategory == category
+                    val count = if (category == NewsCategory.ALL) allNews.size else (categoryCounts[category] ?: 0)
+                    val chipText = enDigits(
+                        if (allNews.isNotEmpty()) "${category.displayName} ($count)" else category.displayName
+                    )
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
@@ -479,7 +421,7 @@ fun NewsScreen(
                             .clickable { selectedCategory = category }
                     ) {
                         Text(
-                            text = category.displayName,
+                            text = chipText,
                             fontSize = 12.sp,
                             fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
                             color = if (isSelected) Color.White else appTextColor(MaterialTheme.colorScheme.onSurface),
@@ -574,7 +516,7 @@ fun NewsScreen(
                     color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant)
                 )
 
-                if (selectedCategory != NewsCategory.ALL || selectedSource != null || searchQuery.isNotBlank()) {
+                if (selectedCategory != NewsCategory.ALL || selectedSource != null) {
                     Text(
                         text = "پاکسازی فیلترها",
                         fontSize = 11.5.sp,
@@ -585,7 +527,6 @@ fun NewsScreen(
                             .clickable {
                                 selectedCategory = NewsCategory.ALL
                                 selectedSource = null
-                                searchQuery = ""
                             }
                             .padding(4.dp)
                     )
@@ -624,7 +565,7 @@ fun NewsScreen(
                             )
                         } else {
                             Icon(
-                                imageVector = Icons.Default.Search,
+                                imageVector = Icons.Default.Newspaper,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.outline,
                                 modifier = Modifier.size(40.dp)
@@ -641,7 +582,7 @@ fun NewsScreen(
                                 text = if (allNews.isEmpty()) {
                                     "برای دریافت تازه‌ترین اخبار روز دکمه زیر را لمس کنید."
                                 } else {
-                                    "لطفاً عبارت جستجو یا فیلتر دسته‌بندی را تغییر دهید."
+                                    "لطفاً فیلتر دسته‌بندی یا منبع خبری را تغییر دهید."
                                 },
                                 fontSize = 12.sp,
                                 color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),

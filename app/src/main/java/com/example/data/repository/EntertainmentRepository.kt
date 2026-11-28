@@ -2,6 +2,8 @@ package com.example.data.repository
 
 import android.content.Context
 import com.example.data.db.EntertainmentDatabase
+import com.example.data.entertainment.CodebreakerGenerator
+import com.example.data.entertainment.NonogramGenerator
 import com.example.data.entertainment.PersianCrosswordGenerator
 import com.example.data.entertainment.PersianWordleAndTriviaBank
 import com.example.data.entertainment.SudokuGenerator
@@ -75,29 +77,41 @@ class EntertainmentRepository(private val context: Context) {
                 val existingById = dao.getAllPuzzlesSnapshot().associateBy { it.id }
 
                 _downloadState.value = _downloadState.value.copy(
-                    progressPercent = 30,
+                    progressPercent = 25,
                     statusText = "در حال ساخت 120 جدول کلمات متقاطع 15×15 (مبتدی تا استاد)..."
                 )
                 val crosswords = PersianCrosswordGenerator.generateAllLevels()
 
                 _downloadState.value = _downloadState.value.copy(
-                    progressPercent = 58,
+                    progressPercent = 45,
                     statusText = "در حال دریافت 120 جدول سودوکو (6×6 و 9×9)..."
                 )
                 val sudokus = SudokuGenerator.generateAllLevels()
 
                 _downloadState.value = _downloadState.value.copy(
-                    progressPercent = 76,
+                    progressPercent = 60,
                     statusText = "در حال دریافت 120 مرحله معما و اطلاعات عمومی..."
                 )
                 val trivias = PersianWordleAndTriviaBank.generateAllTriviaLevels()
 
+                _downloadState.value = _downloadState.value.copy(
+                    progressPercent = 72,
+                    statusText = "در حال ساخت 120 مرحله کدشکن منطقی (مسترمایند)..."
+                )
+                val codebreakers = CodebreakerGenerator.generateAllLevels()
+
+                _downloadState.value = _downloadState.value.copy(
+                    progressPercent = 82,
+                    statusText = "در حال ساخت 120 جدول تصویری نونگرام (5×5 تا 10×10)..."
+                )
+                val nonograms = NonogramGenerator.generateAllLevels()
+
                 var remoteBonus = emptyList<EntertainmentPuzzleEntity>()
-                var sourceLabel = "بسته کامل آفلاین (360 مرحله)"
+                var sourceLabel = "بسته کامل آفلاین (600 مرحله)"
 
                 if (checkRemoteGitHub) {
                     _downloadState.value = _downloadState.value.copy(
-                        progressPercent = 86,
+                        progressPercent = 88,
                         statusText = "در حال بررسی بسته‌های تکمیلی از مخزن آنلاین..."
                     )
                     val repoInput = GitHubUpdateHelper.getSavedRepoInput(appContext)
@@ -113,7 +127,7 @@ class EntertainmentRepository(private val context: Context) {
                     statusText = "در حال ذخیره دائمی در حافظه گوشی..."
                 )
 
-                val allGenerated = (crosswords + sudokus + trivias + remoteBonus)
+                val allGenerated = (crosswords + sudokus + trivias + codebreakers + nonograms + remoteBonus)
                     .distinctBy { it.id }
                     .map { fresh ->
                         val prev = existingById[fresh.id]
@@ -265,7 +279,7 @@ class EntertainmentRepository(private val context: Context) {
     }
 
     companion object {
-        const val CURRENT_PACK_VERSION = 4
-        const val EXPECTED_CORE_PUZZLES = 360
+        const val CURRENT_PACK_VERSION = 5
+        const val EXPECTED_CORE_PUZZLES = 600
     }
 }

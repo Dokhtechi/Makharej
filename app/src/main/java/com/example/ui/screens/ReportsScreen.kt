@@ -93,7 +93,7 @@ import com.example.utils.PersianDateHelper
 
 enum class ReportsTabSection(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     FOLDER_REPORTS("گزارش پوشه‌ها و فیلتر", Icons.Default.FilterList),
-    ANNUAL_CALENDAR("تقویم سالانه 12 ماه", Icons.Default.CalendarMonth)
+    ANNUAL_CALENDAR("تقویم سالانه", Icons.Default.CalendarMonth)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -286,12 +286,7 @@ fun ReportsScreen(
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = scaledDp(14.dp))
-            .testTag("reports_screen")
-    ) {
+    val reportsHeaderContent: @Composable () -> Unit = {
         Spacer(modifier = Modifier.height(4.dp))
 
         // Screen Title & Export Action (Export button placed horizontally underneath the main title)
@@ -304,7 +299,7 @@ fun ReportsScreen(
                 softWrap = true
             )
             Text(
-                text = enDigits(if (currentSection == ReportsTabSection.FOLDER_REPORTS) "گزارش مستقل هر پوشه و نمودارها" else "تقویم سالانه 12 ماه و تحلیل ماهانه"),
+                text = enDigits(if (currentSection == ReportsTabSection.FOLDER_REPORTS) "گزارش مستقل هر پوشه و نمودارها" else "تقویم سالانه و تحلیل ماهانه"),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
@@ -554,7 +549,7 @@ fun ReportsScreen(
                     )
                     Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        text = enDigits("تقویم سالانه 12 ماه"),
+                        text = "تقویم سالانه",
                         fontSize = 11.5.sp,
                         fontWeight = if (currentSection == ReportsTabSection.ANNUAL_CALENDAR) FontWeight.Black else FontWeight.Bold,
                         color = if (currentSection == ReportsTabSection.ANNUAL_CALENDAR) Color.White else appTextColor(MaterialTheme.colorScheme.onSurface)
@@ -564,9 +559,17 @@ fun ReportsScreen(
         }
 
         Spacer(modifier = Modifier.height(6.dp))
+    }
 
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = scaledDp(14.dp))
+            .testTag("reports_screen")
+    ) {
         when (currentSection) {
             ReportsTabSection.FOLDER_REPORTS -> {
+                reportsHeaderContent()
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -1587,6 +1590,7 @@ ReportsTabSection.ANNUAL_CALENDAR -> {
         viewModel = viewModel,
         onAddExpenseInMonth = onAddExpenseInMonth,
         onEditExpense = onEditExpense,
+        topHeader = reportsHeaderContent,
         modifier = Modifier.fillMaxSize()
     )
 }

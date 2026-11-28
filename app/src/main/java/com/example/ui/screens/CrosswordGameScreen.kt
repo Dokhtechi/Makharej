@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -103,7 +104,8 @@ fun CrosswordGameScreen(
     onBack: () -> Unit,
     onSaveProgress: (String, Int) -> Unit,
     onMarkCompleted: (String, Int, Int) -> Unit,
-    onNextLevel: (() -> Unit)?
+    onNextLevel: (() -> Unit)?,
+    onShowGuide: (() -> Unit)? = null
 ) {
     val puzzleData = remember(puzzleEntity.id, puzzleEntity.payloadJson) {
         PersianCrosswordGenerator.deserializeCrossword(puzzleEntity.payloadJson)
@@ -527,6 +529,21 @@ fun CrosswordGameScreen(
                             color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
                             maxLines = 1,
                             softWrap = false
+                        )
+                    }
+                }
+
+                if (onShowGuide != null) {
+                    IconButton(
+                        onClick = onShowGuide,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("crossword_guide_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.HelpOutline,
+                            contentDescription = "راهنمای جدول کلمات",
+                            tint = Color(0xFF4F46E5)
                         )
                     }
                 }

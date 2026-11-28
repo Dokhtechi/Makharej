@@ -135,6 +135,101 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
+object ExpenseSuggestionsStore {
+    const val PREFS_NAME = "expense_suggestions_prefs"
+    const val KEY_ITEMS_LIST = "items_list"
+    private const val KEY_MIGRATED_REMOVE_ALI_FATEMEH = "migrated_remove_ali_fatemeh_v1"
+    private const val SEPARATOR = ";;;"
+
+    val DEFAULT_ITEMS = listOf(
+        "خرید سوپرمارکت", "بنزین", "نانوایی", "رستوران",
+        "اجاره مسکن", "قبوض", "بیمه خودرو", "بیمه موتورسیکلت", "بیمه تکمیلی",
+        "اینترنت", "خرید میوه", "درمان",
+        "موتور", "خیریه"
+    )
+
+    fun loadSuggestions(context: android.content.Context): List<String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        val saved = prefs.getString(KEY_ITEMS_LIST, null)
+        if (saved.isNullOrBlank()) {
+            return DEFAULT_ITEMS
+        }
+        val list = saved.split(SEPARATOR)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toMutableList()
+        list.removeAll {
+            it == "هزینه های نگهداری خودرو" || it == "هزینه های نگهداری ماشین" ||
+                it == "هزینه‌های نگهداری ماشین" || it == "هزینه‌های نگهداری خودرو"
+        }
+        if (list.contains("اجاره و قبوض")) {
+            val idx = list.indexOf("اجاره و قبوض")
+            list.removeAt(idx)
+            if (!list.contains("اجاره مسکن")) list.add(idx, "اجاره مسکن")
+            if (!list.contains("قبوض")) list.add(idx + 1, "قبوض")
+        }
+        if (!list.contains("اجاره مسکن")) {
+            list.add("اجاره مسکن")
+        }
+        if (!list.contains("قبوض")) {
+            list.add("قبوض")
+        }
+        return if (!prefs.getBoolean(KEY_MIGRATED_REMOVE_ALI_FATEMEH, false)) {
+            val cleaned = list.filterNot { trimmed ->
+                trimmed == "فاطمه" || trimmed == "علی" || trimmed == "پول فاطمه" || trimmed == "پول علی"
+            }.distinct()
+            prefs.edit()
+                .putString(KEY_ITEMS_LIST, cleaned.joinToString(SEPARATOR))
+                .putBoolean(KEY_MIGRATED_REMOVE_ALI_FATEMEH, true)
+                .apply()
+            cleaned
+        } else {
+            list.distinct()
+        }
+    }
+
+    fun saveSuggestions(context: android.content.Context, list: List<String>): List<String> {
+        val sanitized = list.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString(KEY_ITEMS_LIST, sanitized.joinToString(SEPARATOR))
+            .putBoolean(KEY_MIGRATED_REMOVE_ALI_FATEMEH, true)
+            .apply()
+        return sanitized
+    }
+
+    fun mergeSuggestionIfMissing(
+        currentItems: List<String>,
+        rawTitle: String
+    ): List<String> {
+        val trimmed = rawTitle.trim()
+        val base = currentItems
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        if (trimmed.isBlank()) return base
+        if (base.any { it == trimmed }) return base
+        return base + trimmed
+    }
+
+    fun addSuggestionIfMissing(
+        context: android.content.Context,
+        rawTitle: String,
+        currentItems: List<String>? = null
+    ): List<String> {
+        val base = (currentItems ?: loadSuggestions(context))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        val merged = mergeSuggestionIfMissing(base, rawTitle)
+        return if (merged.size != base.size) {
+            saveSuggestions(context, merged)
+        } else {
+            base
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun AddExpenseBottomSheet(
@@ -163,54 +258,9 @@ fun AddExpenseBottomSheet(
     onDeleteAnnualExpense: ((ExpenseEntity) -> Unit)? = null
 ) {
     val context = LocalContext.current
-    val prefs = remember(context) {
-        context.getSharedPreferences("expense_suggestions_prefs", android.content.Context.MODE_PRIVATE)
-    }
 
-    val defaultItems = remember {
-        listOf(
-            "خرید سوپرمارکت", "بنزین", "نانوایی", "رستوران",
-            "اجاره مسکن", "قبوض", "بیمه خودرو", "بیمه موتورسیکلت", "بیمه تکمیلی",
-            "اینترنت", "خرید میوه", "درمان",
-            "موتور", "خیریه"
-        )
-    }
-
-    var suggestionItems by remember {
-        val saved = prefs.getString("items_list", null)
-        val initialList = if (!saved.isNullOrBlank()) {
-            val list = saved.split(";;;").filter { it.isNotBlank() }.toMutableList()
-            list.removeAll {
-                it == "هزینه های نگهداری خودرو" || it == "هزینه های نگهداری ماشین" ||
-                it == "هزینه‌های نگهداری ماشین" || it == "هزینه‌های نگهداری خودرو"
-            }
-            if (list.contains("اجاره و قبوض")) {
-                val idx = list.indexOf("اجاره و قبوض")
-                list.removeAt(idx)
-                if (!list.contains("اجاره مسکن")) list.add(idx, "اجاره مسکن")
-                if (!list.contains("قبوض")) list.add(idx + 1, "قبوض")
-            }
-            if (!list.contains("اجاره مسکن")) {
-                list.add("اجاره مسکن")
-            }
-            if (!list.contains("قبوض")) {
-                list.add("قبوض")
-            }
-            val cleaned = list.filterNot {
-                val trimmed = it.trim()
-                trimmed == "فاطمه" || trimmed == "علی" || trimmed == "پول فاطمه" || trimmed == "پول علی"
-            }.distinct()
-            if (!prefs.getBoolean("migrated_remove_ali_fatemeh_v1", false)) {
-                prefs.edit()
-                    .putString("items_list", cleaned.joinToString(";;;"))
-                    .putBoolean("migrated_remove_ali_fatemeh_v1", true)
-                    .apply()
-            }
-            cleaned
-        } else {
-            defaultItems
-        }
-        mutableStateOf(initialList)
+    var suggestionItems by remember(context) {
+        mutableStateOf(ExpenseSuggestionsStore.loadSuggestions(context))
     }
 
     val isEditing = expenseToEdit != null
@@ -298,8 +348,7 @@ fun AddExpenseBottomSheet(
     val amountLong = amountString.toLongOrNull() ?: 0L
 
     fun saveSuggestions(list: List<String>) {
-        suggestionItems = list
-        prefs.edit().putString("items_list", list.joinToString(";;;")).apply()
+        suggestionItems = ExpenseSuggestionsStore.saveSuggestions(context, list)
     }
 
     fun moveSuggestionItem(fromIndex: Int, toIndex: Int) {
@@ -1247,6 +1296,13 @@ fun AddExpenseBottomSheet(
                         return@Button
                     }
 
+                    val trimmedTitle = title.trim()
+                    suggestionItems = ExpenseSuggestionsStore.addSuggestionIfMissing(
+                        context = context,
+                        rawTitle = trimmedTitle,
+                        currentItems = suggestionItems
+                    )
+
                     val cleanDate = PersianDateHelper.toEnglishDigits(selectedDateString)
                     val parts = cleanDate.split("/")
                     val cleanedFolder = customFolder.takeIf { it.isNotBlank() }?.let {
@@ -1262,7 +1318,7 @@ fun AddExpenseBottomSheet(
                         val dPadded = if (d < 10) "0$d" else "$d"
 
                         val updated = expenseToEdit.copy(
-                            title = title.trim(),
+                            title = trimmedTitle,
                             amount = amountLong,
                             isAnnual = isAnnual,
                             customFolder = cleanedFolder,
@@ -1276,7 +1332,7 @@ fun AddExpenseBottomSheet(
                         onUpdateExpense?.invoke(updated)
                     } else {
                         onAddExpense(
-                            title,
+                            trimmedTitle,
                             amountLong,
                             isAnnual,
                             cleanedFolder,
@@ -1402,9 +1458,12 @@ fun AddExpenseBottomSheet(
                         onClick = {
                             val trimmed = newItemText.trim()
                             var addedAndSelected = false
-                            if (trimmed.isNotBlank() && !suggestionItems.contains(trimmed)) {
-                                val updated = suggestionItems.toMutableList().apply { add(trimmed) }
-                                saveSuggestions(updated)
+                            if (trimmed.isNotBlank()) {
+                                suggestionItems = ExpenseSuggestionsStore.addSuggestionIfMissing(
+                                    context = context,
+                                    rawTitle = trimmed,
+                                    currentItems = suggestionItems
+                                )
                                 title = trimmed
                                 if (trimmed.contains("بیمه") || trimmed.contains("عوارض سالانه")) {
                                     isAnnual = true
@@ -1698,7 +1757,7 @@ fun AddExpenseBottomSheet(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
                                 .clickable {
-                                    saveSuggestions(defaultItems)
+                                    saveSuggestions(ExpenseSuggestionsStore.DEFAULT_ITEMS)
                                 }
                         ) {
                             Text(

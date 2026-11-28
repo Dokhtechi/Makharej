@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.CheckCircle
@@ -96,7 +97,8 @@ fun SudokuGameScreen(
     onBack: () -> Unit,
     onSaveProgress: (String, Int) -> Unit,
     onMarkCompleted: (String, Int, Int) -> Unit,
-    onNextLevel: (() -> Unit)?
+    onNextLevel: (() -> Unit)?,
+    onShowGuide: (() -> Unit)? = null
 ) {
     val sudoku = remember(puzzleEntity.id, puzzleEntity.payloadJson) {
         SudokuGenerator.deserializeSudoku(puzzleEntity.payloadJson)
@@ -409,6 +411,20 @@ fun SudokuGameScreen(
                         contentDescription = "بازگشت",
                         tint = MaterialTheme.colorScheme.onBackground
                     )
+                }
+                if (onShowGuide != null) {
+                    IconButton(
+                        onClick = onShowGuide,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("sudoku_guide_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.HelpOutline,
+                            contentDescription = "راهنمای سودوکو",
+                            tint = Color(0xFF0284C7)
+                        )
+                    }
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(

@@ -6,6 +6,8 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Build
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import com.example.data.model.NewsArticle
 import com.google.firebase.Firebase
@@ -49,6 +51,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -231,6 +234,7 @@ class PersianNewsSpeechEngine(private val context: Context) {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
     private var mediaPlayer: MediaPlayer? = null
+    private var offlineTts: TextToSpeech? = null
     private var playbackJob: Job? = null
     private var activeArticleRef: NewsArticle? = null
 
@@ -269,6 +273,86 @@ class PersianNewsSpeechEngine(private val context: Context) {
             stop()
         } else {
             speakArticle(article)
+        }
+    }
+
+    /**
+     * Toggles Persian voice readout for arbitrary plain/markdown text (e.g., AI assistant replies).
+     * Uses fast Iranian neural speech (Edge -> Bing -> Google Translate Persian MP3 -> Gemini -> offline TTS)
+     * so playback works reliably on all Android devices even without an installed Persian system TTS pack.
+     */
+    fun togglePlainText(utteranceId: String, title: String, rawText: String) {
+        val current = _state.value
+        if (current.activeArticleId == utteranceId && (current.isPlaying || current.isLoading)) {
+            stop()
+        } else {
+            speakPlainText(utteranceId, title, rawText)
+        }
+    }
+
+    fun speakPlainText(utteranceId: String, title: String, rawText: String) {
+        stopInternal(clearStatus = true)
+        activeArticleRef = null
+
+        val cleaned = normalizePlainPersianForSpeech(rawText)
+        val chunks = splitIntoNaturalPersianChunks(cleaned, maxChunkLength = 340)
+        if (chunks.isEmpty()) {
+            _state.value = _state.value.copy(statusMessage = "متن قابل خوانش یافت نشد")
+            return
+        }
+
+        val speed = _state.value.speechSpeed
+        // Use a lively, warm Iranian male persona instead of the heavy deep news-anchor baritone
+        val persona = NewsVoicePersona.KAMRAN_MALE
+
+        _state.value = NewsSpeechState(
+            activeArticleId = utteranceId,
+            activeArticleTitle = title,
+            isLoading = true,
+            isPlaying = false,
+            currentChunkIndex = 0,
+            totalChunks = chunks.size,
+            speechSpeed = speed,
+            voicePersona = persona,
+            statusMessage = null
+        )
+
+        requestAudioFocus()
+
+        playbackJob = scope.launch {
+            try {
+                val firstChunk = withContext(Dispatchers.IO) {
+                    synthesizeFastPersianChunk(chunks[0], persona)
+                }
+
+                if (!isActive) return@launch
+
+                if (firstChunk != null) {
+                    playStreamedChunks(chunks, firstChunk, persona, fastFirst = true)
+                } else {
+                    // Online engines unreachable — try device offline Persian TTS before reporting error
+                    val spokeOffline = tryOfflineDevicePersianTts(utteranceId, cleaned)
+                    if (!isActive) return@launch
+                    if (!spokeOffline) {
+                        stopInternal(clearStatus = false)
+                        _state.value = _state.value.copy(
+                            statusMessage = "خطا در پخش صوتی؛ اتصال اینترنت را بررسی کنید یا صدای فارسی گوشی را نصب کنید."
+                        )
+                    } else {
+                        stopInternal(clearStatus = true)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TTS_TAG, "Plain-text speech playback failed", e)
+                if (isActive) {
+                    stopInternal(clearStatus = false)
+                    _state.value = _state.value.copy(
+                        statusMessage = "خطا در پخش صوتی؛ لطفاً دوباره تلاش کنید."
+                    )
+                }
+            }
         }
     }
 
@@ -347,7 +431,8 @@ class PersianNewsSpeechEngine(private val context: Context) {
     private suspend fun playStreamedChunks(
         chunks: List<String>,
         firstChunk: SynthesizedChunk,
-        persona: NewsVoicePersona
+        persona: NewsVoicePersona,
+        fastFirst: Boolean = false
     ) {
         var currentChunk: SynthesizedChunk? = firstChunk
 
@@ -356,12 +441,16 @@ class PersianNewsSpeechEngine(private val context: Context) {
 
             if (currentChunk == null) {
                 val retried = withContext(Dispatchers.IO) {
-                    synthesizeTehraniPersianChunk(chunks[index], persona)
+                    if (fastFirst) {
+                        synthesizeFastPersianChunk(chunks[index], persona)
+                    } else {
+                        synthesizeTehraniPersianChunk(chunks[index], persona)
+                    }
                 }
                 if (retried == null) {
                     stopInternal(clearStatus = false)
                     _state.value = _state.value.copy(
-                        statusMessage = "اتصال برای ادامه خوانش خبر قطع شد."
+                        statusMessage = "اتصال برای ادامه پخش صوتی قطع شد."
                     )
                     return
                 }
@@ -380,7 +469,11 @@ class PersianNewsSpeechEngine(private val context: Context) {
 
             val nextDeferred = if (index + 1 < chunks.size) {
                 scope.async(Dispatchers.IO) {
-                    synthesizeTehraniPersianChunk(chunks[index + 1], persona)
+                    if (fastFirst) {
+                        synthesizeFastPersianChunk(chunks[index + 1], persona)
+                    } else {
+                        synthesizeTehraniPersianChunk(chunks[index + 1], persona)
+                    }
                 }
             } else {
                 null
@@ -408,6 +501,134 @@ class PersianNewsSpeechEngine(private val context: Context) {
             stopInternal(clearStatus = true)
         }
     }
+
+    /**
+     * Fast-first Iranian Persian synthesis for interactive AI replies:
+     * 1) Edge Native Iranian Neural (`fa-IR-FaridNeural` / `fa-IR-DilaraNeural`) — fast, works without VPN
+     * 2) Bing Native Iranian Neural (`fa-IR`)
+     * 3) Google Translate Persian TTS MP3 (lightweight HTTPS fallback)
+     * 4) Gemini TTS with shorter timeout
+     */
+    private suspend fun synthesizeFastPersianChunk(
+        chunkText: String,
+        persona: NewsVoicePersona
+    ): SynthesizedChunk? {
+        val edgeNative = tryEdgeNativeIranianWebSocket(chunkText, persona, naturalFriendlyMale = true)
+        if (edgeNative != null && edgeNative.size > 400) {
+            return SynthesizedChunk(bytes = edgeNative, extension = "mp3")
+        }
+
+        val bingNative = tryBingNativeIranianTts(chunkText, persona, naturalFriendlyMale = true)
+        if (bingNative != null && bingNative.size > 400) {
+            return SynthesizedChunk(bytes = bingNative, extension = "mp3")
+        }
+
+        val googleTranslateMp3 = tryGoogleTranslatePersianTts(chunkText)
+        if (googleTranslateMp3 != null && googleTranslateMp3.size > 400) {
+            return SynthesizedChunk(bytes = googleTranslateMp3, extension = "mp3")
+        }
+
+        val geminiAudio = withTimeoutOrNull(12_000L) {
+            tryGeminiTehraniTts(chunkText, persona)
+        }
+        if (geminiAudio != null) return geminiAudio
+
+        return null
+    }
+
+    private fun tryGoogleTranslatePersianTts(chunkText: String): ByteArray? {
+        val subParts = splitIntoNaturalPersianChunks(chunkText, maxChunkLength = 175)
+        if (subParts.isEmpty()) return null
+        val combined = ByteArrayOutputStream()
+        for (part in subParts) {
+            val encoded = URLEncoder.encode(part, "UTF-8")
+            val url = "https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=fa&client=tw-ob&q=$encoded"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", BROWSER_USER_AGENT)
+                .header("Referer", "https://translate.google.com/")
+                .build()
+            try {
+                httpClient.newCall(req).execute().use { resp ->
+                    val contentType = resp.header("Content-Type").orEmpty()
+                    val bytes = resp.body?.bytes()
+                    if (resp.isSuccessful && bytes != null && isValidAudioPayload(bytes, contentType)) {
+                        combined.write(bytes)
+                    } else {
+                        return null
+                    }
+                }
+            } catch (_: Exception) {
+                return null
+            }
+        }
+        val out = combined.toByteArray()
+        return if (out.size > 400) out else null
+    }
+
+    private suspend fun tryOfflineDevicePersianTts(utteranceId: String, text: String): Boolean =
+        suspendCancellableCoroutine { cont ->
+            var engine: TextToSpeech? = null
+            engine = TextToSpeech(context.applicationContext) { status ->
+                if (status != TextToSpeech.SUCCESS) {
+                    runCatching { engine?.shutdown() }
+                    if (cont.isActive) cont.resume(false)
+                    return@TextToSpeech
+                }
+                val tts = engine ?: run {
+                    if (cont.isActive) cont.resume(false)
+                    return@TextToSpeech
+                }
+                offlineTts = tts
+                val faIr = tts.isLanguageAvailable(Locale("fa", "IR"))
+                val faOnly = tts.isLanguageAvailable(Locale("fa"))
+                val selectedLocale = when {
+                    faIr >= TextToSpeech.LANG_AVAILABLE -> Locale("fa", "IR")
+                    faOnly >= TextToSpeech.LANG_AVAILABLE -> Locale("fa")
+                    else -> null
+                }
+                if (selectedLocale == null) {
+                    runCatching { tts.shutdown() }
+                    if (offlineTts === tts) offlineTts = null
+                    if (cont.isActive) cont.resume(false)
+                    return@TextToSpeech
+                }
+                tts.language = selectedLocale
+                tts.setSpeechRate(_state.value.speechSpeed.coerceIn(0.8f, 1.4f))
+                tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(id: String?) {
+                        _state.value = _state.value.copy(isLoading = false, isPlaying = true)
+                    }
+
+                    override fun onDone(id: String?) {
+                        runCatching { tts.shutdown() }
+                        if (offlineTts === tts) offlineTts = null
+                        if (cont.isActive) cont.resume(true)
+                    }
+
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(id: String?) {
+                        runCatching { tts.shutdown() }
+                        if (offlineTts === tts) offlineTts = null
+                        if (cont.isActive) cont.resume(false)
+                    }
+                })
+                _state.value = _state.value.copy(isLoading = false, isPlaying = true)
+                val res = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                if (res != TextToSpeech.SUCCESS) {
+                    runCatching { tts.shutdown() }
+                    if (offlineTts === tts) offlineTts = null
+                    if (cont.isActive) cont.resume(false)
+                }
+            }
+            cont.invokeOnCancellation {
+                runCatching {
+                    engine?.stop()
+                    engine?.shutdown()
+                }
+                if (offlineTts === engine) offlineTts = null
+            }
+        }
 
     /**
      * Online Tehran-Iranian Persian synthesis:
@@ -490,10 +711,11 @@ class PersianNewsSpeechEngine(private val context: Context) {
     // -------------------------------------------------------------------------
     private suspend fun tryEdgeNativeIranianWebSocket(
         chunkText: String,
-        persona: NewsVoicePersona
+        persona: NewsVoicePersona,
+        naturalFriendlyMale: Boolean = false
     ): ByteArray? {
         for (attempt in 0..1) {
-            val result = executeEdgeWebSocketOnce(chunkText, persona)
+            val result = executeEdgeWebSocketOnce(chunkText, persona, naturalFriendlyMale)
             if (result.audioBytes != null && result.audioBytes.size > 400) {
                 return result.audioBytes
             }
@@ -513,7 +735,8 @@ class PersianNewsSpeechEngine(private val context: Context) {
 
     private suspend fun executeEdgeWebSocketOnce(
         chunkText: String,
-        persona: NewsVoicePersona
+        persona: NewsVoicePersona,
+        naturalFriendlyMale: Boolean = false
     ): EdgeWsAttemptResult = withTimeoutOrNull(16_000L) {
         suspendCancellableCoroutine { cont ->
             val connectionId = UUID.randomUUID().toString().replace("-", "")
@@ -551,7 +774,11 @@ class PersianNewsSpeechEngine(private val context: Context) {
                         """{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}"""
                     webSocket.send(configMsg)
 
-                    val ssml = buildEdgeSsmlForPersona(chunkText, persona)
+                    val ssml = if (naturalFriendlyMale) {
+                        buildNaturalFriendlyMaleEdgeSsml(chunkText)
+                    } else {
+                        buildEdgeSsmlForPersona(chunkText, persona)
+                    }
                     val ssmlMsg = "X-RequestId:$requestId\r\n" +
                         "Content-Type:application/ssml+xml\r\n" +
                         "X-Timestamp:${timestamp}Z\r\n" +
@@ -622,10 +849,18 @@ class PersianNewsSpeechEngine(private val context: Context) {
     // -------------------------------------------------------------------------
     // TIER 2B: Native Iranian Neural Backup via Bing Translator (`fa-IR`)
     // -------------------------------------------------------------------------
-    private fun tryBingNativeIranianTts(chunkText: String, persona: NewsVoicePersona): ByteArray? {
+    private fun tryBingNativeIranianTts(
+        chunkText: String,
+        persona: NewsVoicePersona,
+        naturalFriendlyMale: Boolean = false
+    ): ByteArray? {
         for (attempt in 0..1) {
             val session = getOrFetchBingSession(forceRefresh = attempt > 0) ?: return null
-            val ssml = buildBingSsmlForPersona(chunkText, persona)
+            val ssml = if (naturalFriendlyMale) {
+                buildNaturalFriendlyMaleBingSsml(chunkText)
+            } else {
+                buildBingSsmlForPersona(chunkText, persona)
+            }
             val url = "https://www.bing.com/tfettts?isVertical=1&&IG=${session.ig}&IID=${session.iid}"
             val formBody = FormBody.Builder()
                 .add("ssml", ssml)
@@ -772,6 +1007,11 @@ class PersianNewsSpeechEngine(private val context: Context) {
         playbackJob?.cancel()
         playbackJob = null
         releaseMediaPlayer()
+        runCatching {
+            offlineTts?.stop()
+            offlineTts?.shutdown()
+        }
+        offlineTts = null
         abandonAudioFocus()
         val prev = _state.value
         _state.value = NewsSpeechState(
@@ -943,6 +1183,28 @@ class PersianNewsSpeechEngine(private val context: Context) {
                 "</voice></speak>"
         }
 
+        /**
+         * Warm, engaging, natural young Iranian male voice profile for AI replies
+         * (clear & lively, avoiding an overly deep/booming baritone pitch).
+         */
+        fun buildNaturalFriendlyMaleEdgeSsml(text: String): String {
+            val escaped = escapeXml(text)
+            return "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='fa-IR'>" +
+                "<voice name='Microsoft Server Speech Text to Speech Voice (fa-IR, FaridNeural)'>" +
+                "<prosody pitch='+10Hz' rate='+5%' volume='+0%'>$escaped</prosody>" +
+                "</voice></speak>"
+        }
+
+        fun buildNaturalFriendlyMaleBingSsml(text: String): String {
+            val escaped = escapeXml(text)
+                .replace(". ", ". <break time='190ms'/> ")
+                .replace("، ", "، <break time='95ms'/> ")
+            return "<speak version='1.0' xml:lang='fa-IR'>" +
+                "<voice xml:lang='fa-IR' xml:gender='Male' name='fa-IR-FaridNeural'>" +
+                "<prosody rate='+5%' pitch='+7%'>$escaped</prosody>" +
+                "</voice></speak>"
+        }
+
         fun buildBingSsml(text: String, useMale: Boolean = true): String {
             val persona = if (useMale) NewsVoicePersona.ARASH_MALE else NewsVoicePersona.SARA_FEMALE
             return buildBingSsmlForPersona(text, persona)
@@ -1013,6 +1275,17 @@ class PersianNewsSpeechEngine(private val context: Context) {
                     append(cleanBody)
                 }
             }.trim()
+        }
+
+        fun normalizePlainPersianForSpeech(raw: String): String {
+            val stripped = raw
+                .replace(Regex("""```[\s\S]*?```"""), " ")
+                .replace(Regex("""[*_`#~>]+"""), " ")
+                .replace("☐", "مورد: ")
+                .replace("☑", "انجام‌شده: ")
+                .replace("✅", " ")
+                .replace("❌", " ")
+            return normalizePersianForSpeech(stripped)
         }
 
         fun normalizePersianForSpeech(raw: String): String {

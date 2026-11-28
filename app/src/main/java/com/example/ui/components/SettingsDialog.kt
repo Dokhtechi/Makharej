@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -1067,21 +1068,29 @@ fun SettingsDialog(
                             ) {
                                 Surface(
                                     shape = CircleShape,
-                                    color = Color.White,
+                                    color = Color(0xFFB2C1CE),
                                     border = BorderStroke(2.dp, Color(0xFF0284C7)),
                                     shadowElevation = 3.dp,
                                     modifier = Modifier
-                                        .size(56.dp)
+                                        .size(64.dp)
                                         .testTag("settings_creator_photo")
                                 ) {
-                                    Image(
-                                        painter = painterResource(id = R.drawable.creator_avatar),
-                                        contentDescription = "عکس سازنده برنامه محمد عظیمی",
-                                        contentScale = ContentScale.Crop,
+                                    Box(
                                         modifier = Modifier
-                                            .size(56.dp)
+                                            .fillMaxSize()
                                             .clip(CircleShape)
-                                    )
+                                            .background(Color(0xFFB2C1CE))
+                                    ) {
+                                        Image(
+                                            painter = painterResource(id = R.drawable.creator_avatar),
+                                            contentDescription = "عکس سازنده برنامه محمد عظیمی",
+                                            contentScale = ContentScale.Crop,
+                                            alignment = Alignment.TopCenter,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(top = 5.dp)
+                                        )
+                                    }
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {

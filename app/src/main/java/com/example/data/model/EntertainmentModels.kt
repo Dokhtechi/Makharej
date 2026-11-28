@@ -22,6 +22,16 @@ enum class EntertainmentGameType(
         key = "TRIVIA",
         titleFa = "معما و اطلاعات عمومی",
         subtitleFa = "چیستان، هوش و دانستنی‌های ایران و جهان"
+    ),
+    CODEBREAKER(
+        key = "CODEBREAKER",
+        titleFa = "کدشکن منطقی (مسترمایند)",
+        subtitleFa = "استنتاج رمز عددی گاوصندوق با تحلیل سرنخ‌های سبز و طلایی"
+    ),
+    NONOGRAM(
+        key = "NONOGRAM",
+        titleFa = "جدول تصویری نونگرام",
+        subtitleFa = "کشف تصویر پنهان با منطق اعداد سطر و ستون (5×5 تا 10×10)"
     );
 
     companion object {
@@ -108,4 +118,22 @@ data class TriviaQuestionData(
     val correctIndex: Int,
     val category: String,
     val explanation: String
+)
+
+data class CodebreakerPuzzleData(
+    val codeLength: Int,
+    val minDigit: Int,
+    val maxDigit: Int,
+    val allowRepeats: Boolean,
+    val maxAttempts: Int,
+    val secretCode: String,
+    val themeTitle: String,
+    val hintText: String
+)
+
+data class NonogramPuzzleData(
+    val size: Int,
+    val artworkTitle: String,
+    val accentHex: Long,
+    val solutionRows: List<String> // Each string has length `size`, '1' = filled, '0' = empty
 )

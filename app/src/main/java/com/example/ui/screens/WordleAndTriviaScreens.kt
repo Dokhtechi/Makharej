@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -97,7 +98,8 @@ fun TriviaGameScreen(
     onBack: () -> Unit,
     onSaveProgress: (String, Int) -> Unit,
     onMarkCompleted: (String, Int, Int) -> Unit,
-    onNextLevel: (() -> Unit)?
+    onNextLevel: (() -> Unit)?,
+    onShowGuide: (() -> Unit)? = null
 ) {
     val data = remember(puzzleEntity.id, puzzleEntity.payloadJson) {
         PersianWordleAndTriviaBank.deserializeTrivia(puzzleEntity.payloadJson)
@@ -262,7 +264,22 @@ fun TriviaGameScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.width(6.dp))
+            if (onShowGuide != null) {
+                IconButton(
+                    onClick = onShowGuide,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("trivia_guide_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.HelpOutline,
+                        contentDescription = "راهنمای معما و چیستان",
+                        tint = Color(0xFF059669)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(4.dp))
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,

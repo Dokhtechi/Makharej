@@ -1514,6 +1514,224 @@ class ExampleUnitTest {
     assertTrue("Ding chime should have audible bell attack peak", peakStart > 8_000)
     assertTrue("Ding chime should smoothly decay toward silence", peakTail < peakStart / 2)
   }
+
+  @Test
+  fun testMarketRatesLiveFreshnessAndAntiYesterdayGuard() {
+    // Reference moment: 2026-11-24 14:30:00 IRST (11:00:00 UTC) -> Tehran Shamsi day = 1405/09/03
+    val today1430Ms = 1_795_518_000_000L
+    val todayDay = com.example.data.network.MarketRatesService.getTehranShamsiDay(today1430Ms)
+    assertEquals("1405/09/03", todayDay)
+
+    val yesterdayDay = "1405/09/02"
+    assertTrue(com.example.data.network.MarketRatesService.isFromPreviousDay(yesterdayDay, todayDay))
+    assertFalse(com.example.data.network.MarketRatesService.isFromPreviousDay(todayDay, todayDay))
+    assertFalse(com.example.data.network.MarketRatesService.isFromPreviousDay("", todayDay))
+
+    // 1. Parsing TGJU timestamps: Gregorian ts today vs yesterday, Shamsi t yesterday, HH:mm:ss today
+    val (tsToday, dayToday) = com.example.data.network.MarketRatesService.parseTgjuItemTimestamp(
+      tsRaw = "2026-11-24 14:15:20",
+      tRaw = "14:15:20",
+      nowMs = today1430Ms
+    )
+    assertEquals(todayDay, dayToday)
+    assertTrue(tsToday > 0L)
+
+    val (tsYesterday, dayYesterday) = com.example.data.network.MarketRatesService.parseTgjuItemTimestamp(
+      tsRaw = "2026-11-23 16:58:00",
+      tRaw = "1405/09/02",
+      nowMs = today1430Ms
+    )
+    assertEquals(yesterdayDay, dayYesterday)
+    assertTrue(tsYesterday < tsToday)
+
+    val (_, shamsiOnlyYesterday) = com.example.data.network.MarketRatesService.parseTgjuItemTimestamp(
+      tsRaw = null,
+      tRaw = "۱۴۰۵/۰۹/۰۲",
+      nowMs = today1430Ms
+    )
+    assertEquals(yesterdayDay, shamsiOnlyYesterday)
+
+    // 2. Post-17:00 anti-yesterday guard: yesterday's item MUST be rejected even when cache is empty or populated
+    val todayLiveItem = com.example.data.model.MarketRateItem(
+      key = "price_dollar_rl",
+      title = "دلار آمریکا",
+      priceTomans = 84_500L,
+      changePercent = 0.8,
+      isPositiveChange = true,
+      timeFormatted = "14:15:20",
+      sourceTimestampMs = tsToday,
+      sourceTehranDay = todayDay
+    )
+    val yesterdayStaleItem = com.example.data.model.MarketRateItem(
+      key = "price_dollar_rl",
+      title = "دلار آمریکا",
+      priceTomans = 82_100L,
+      changePercent = 0.4,
+      isPositiveChange = false,
+      timeFormatted = "1405/09/02",
+      sourceTimestampMs = tsYesterday,
+      sourceTehranDay = yesterdayDay
+    )
+    assertFalse(
+      "Yesterday's rate must NEVER be accepted on a new Tehran day",
+      com.example.data.network.MarketRatesService.shouldAcceptIncomingRate("", 0L, yesterdayStaleItem, todayDay)
+    )
+    assertFalse(
+      "Yesterday's rate must NEVER overwrite today's rate after 17:00",
+      com.example.data.network.MarketRatesService.shouldAcceptIncomingRate(todayDay, tsToday, yesterdayStaleItem, todayDay)
+    )
+
+    // 3. Intraday live refresh: newer price tick during 11:00-17:00 MUST replace older tick, older mirror MUST NOT regress it
+    val newerIntradayItem = todayLiveItem.copy(
+      priceTomans = 85_200L,
+      sourceTimestampMs = tsToday + 300_000L // +5 minutes
+    )
+    assertTrue(
+      com.example.data.network.MarketRatesService.shouldAcceptIncomingRate(todayDay, tsToday, newerIntradayItem, todayDay)
+    )
+    assertFalse(
+      "Lagging CDN mirror with older timestamp must not overwrite fresher intraday price",
+      com.example.data.network.MarketRatesService.shouldAcceptIncomingRate(todayDay, newerIntradayItem.sourceTimestampMs, todayLiveItem, todayDay)
+    )
+    val picked = com.example.data.network.MarketRatesService.pickFresherRate(todayLiveItem, newerIntradayItem, todayDay)
+    assertEquals(85_200L, picked?.priceTomans)
+  }
+
+  @Test
+  fun testAdultBrainGamesCodebreakerAndNonogram() {
+    // 1. Codebreaker (Mastermind): 120 levels across 4 tiers + Bulls & Cows evaluation + JSON round-trip
+    val cbLevels = com.example.data.entertainment.CodebreakerGenerator.generateAllLevels()
+    assertEquals(120, cbLevels.size)
+    assertEquals(30, cbLevels.count { it.difficulty == com.example.data.model.EntertainmentDifficulty.BEGINNER.key })
+    assertEquals(30, cbLevels.count { it.difficulty == com.example.data.model.EntertainmentDifficulty.MASTER.key })
+
+    for (entity in cbLevels) {
+      val parsed = com.example.data.entertainment.CodebreakerGenerator.parsePayload(entity.payloadJson)
+      assertNotNull("Failed to parse Codebreaker payload for ${entity.id}", parsed)
+      assertEquals(parsed!!.codeLength, parsed.secretCode.length)
+      assertTrue(parsed.secretCode.all { it - '0' in parsed.minDigit..parsed.maxDigit })
+      if (!parsed.allowRepeats) {
+        assertEquals(parsed.codeLength, parsed.secretCode.toSet().size)
+      }
+    }
+
+    // Exact & misplaced peg evaluation (including repeated digits edge case!)
+    assertEquals(4 to 0, com.example.data.entertainment.CodebreakerGenerator.evaluateGuess("4829", "4829"))
+    assertEquals(1 to 2, com.example.data.entertainment.CodebreakerGenerator.evaluateGuess("4829", "4291"))
+    assertEquals(0 to 4, com.example.data.entertainment.CodebreakerGenerator.evaluateGuess("1234", "4321"))
+    assertEquals(1 to 2, com.example.data.entertainment.CodebreakerGenerator.evaluateGuess("1123", "1319"))
+    assertEquals(1 to 1, com.example.data.entertainment.CodebreakerGenerator.evaluateGuess("1123", "1419"))
+    assertEquals(1 to 0, com.example.data.entertainment.CodebreakerGenerator.evaluateGuess("1234", "1111"))
+
+    // 2. Nonogram (Picross): 120 levels across 4 tiers + clue math + non-empty line invariants + JSON round-trip
+    val ngLevels = com.example.data.entertainment.NonogramGenerator.generateAllLevels()
+    assertEquals(120, ngLevels.size)
+    for (entity in ngLevels) {
+      val parsed = com.example.data.entertainment.NonogramGenerator.parsePayload(entity.payloadJson)
+      assertNotNull("Failed to parse Nonogram payload for ${entity.id}", parsed)
+      assertEquals(parsed!!.size, parsed.solutionRows.size)
+      assertTrue(parsed.solutionRows.all { it.length == parsed.size })
+      // Every row and column must have at least 1 filled cell
+      val rowClues = com.example.data.entertainment.NonogramGenerator.computeRowClues(parsed.solutionRows)
+      val colClues = com.example.data.entertainment.NonogramGenerator.computeColClues(parsed.solutionRows)
+      assertTrue("Row clues should never be empty in ${entity.id}", rowClues.all { it.isNotEmpty() && it[0] > 0 })
+      assertTrue("Col clues should never be empty in ${entity.id}", colClues.all { it.isNotEmpty() && it[0] > 0 })
+    }
+
+    // Line clue computation verification
+    assertEquals(
+      listOf(2, 1, 3),
+      com.example.data.entertainment.NonogramGenerator.computeLineClues(
+        listOf(true, true, false, true, false, true, true, true)
+      )
+    )
+    assertEquals(
+      listOf(0),
+      com.example.data.entertainment.NonogramGenerator.computeLineClues(listOf(false, false, false))
+    )
+  }
+
+  @Test
+  fun testNavigationTabsWithoutAiAndEntertainmentGuides() {
+    // 1. ScreenTab has 6 clean tabs in RTL order including Price Search
+    val tabs = ScreenTab.entries
+    assertEquals(6, tabs.size)
+    assertEquals(ScreenTab.DASHBOARD, tabs[0])
+    assertEquals(ScreenTab.REPORTS, tabs[1])
+    assertEquals(ScreenTab.TOOLS, tabs[2])
+    assertEquals(ScreenTab.PRICE_SEARCH, tabs[3])
+    assertEquals(ScreenTab.NEWS, tabs[4])
+    assertEquals(ScreenTab.ENTERTAINMENT, tabs[5])
+
+    // 2. Every entertainment game has a plain-Persian step-by-step guide with goal, steps, and tip
+    assertTrue(com.example.ui.components.EntertainmentGuideContentProvider.generalOverviewSteps.size >= 3)
+    com.example.data.model.EntertainmentGameType.entries.forEach { game ->
+      val guide = com.example.ui.components.EntertainmentGuideContentProvider.guideFor(game)
+      assertEquals(game, guide.gameType)
+      assertTrue(guide.goalFa.isNotBlank())
+      assertTrue(guide.steps.size >= 3)
+      assertTrue(guide.steps.all { it.isNotBlank() })
+      assertTrue(guide.tipFa.isNotBlank())
+    }
+  }
+
+  @Test
+  fun testPriceSearchSortingAndNewsCapacity() {
+    // 1. News capacity supports >= 80 articles with >= 10 per category across all 8 categories
+    assertTrue(com.example.data.repository.NewsRepository.TARGET_TOTAL_NEWS_COUNT >= 80)
+    assertTrue(com.example.data.repository.NewsRepository.PREFERRED_PER_CATEGORY_COUNT >= 10)
+
+    // 2. Default sort is cheapest first; toggling switches to expensive first
+    val sampleItems = listOf(
+      com.example.data.model.PriceProductItem(
+        id = "b1",
+        title = "گوشی سامسونگ A55",
+        priceToman = 19_500_000L,
+        imageUrl = "https://cdn.example.com/a55.jpg",
+        productUrl = "https://basalam.com/p/123",
+        source = com.example.data.model.PriceSource.BASALAM,
+        shopName = "غرفه موبایل پارس"
+      ),
+      com.example.data.model.PriceProductItem(
+        id = "b2",
+        title = "گوشی سامسونگ A55 نسخه ۲۵۶",
+        priceToman = 18_200_000L,
+        imageUrl = null,
+        productUrl = "https://basalam.com/p/456",
+        source = com.example.data.model.PriceSource.BASALAM,
+        shopName = "غرفه دیجیتال"
+      )
+    )
+    val cheapestState = com.example.ui.viewmodel.PriceSearchUiState(items = sampleItems)
+    assertEquals(18_200_000L, cheapestState.sortedItems.first().priceToman)
+    val expensiveState = cheapestState.copy(sortOrder = com.example.data.model.PriceSortOrder.EXPENSIVE_FIRST)
+    assertEquals(19_500_000L, expensiveState.sortedItems.first().priceToman)
+  }
+
+  @Test
+  fun testExpenseSuggestionsAutoAppend() {
+    val initial = com.example.ui.components.ExpenseSuggestionsStore.DEFAULT_ITEMS
+    val withNew = com.example.ui.components.ExpenseSuggestionsStore.mergeSuggestionIfMissing(
+      initial,
+      "  شارژ ساختمان  "
+    )
+    assertEquals(initial.size + 1, withNew.size)
+    assertEquals("شارژ ساختمان", withNew.last())
+
+    // Duplicate title does not create duplicate entries
+    val duplicate = com.example.ui.components.ExpenseSuggestionsStore.mergeSuggestionIfMissing(
+      withNew,
+      "شارژ ساختمان"
+    )
+    assertEquals(withNew, duplicate)
+
+    // Blank title is ignored
+    val blank = com.example.ui.components.ExpenseSuggestionsStore.mergeSuggestionIfMissing(
+      withNew,
+      "   "
+    )
+    assertEquals(withNew, blank)
+  }
 }
 
 

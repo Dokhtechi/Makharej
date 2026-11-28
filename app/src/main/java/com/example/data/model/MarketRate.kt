@@ -11,7 +11,9 @@ data class MarketRateItem(
     val unitLabel: String = "تومان",
     val displayPriceFormatted: String? = null,
     val displayDiffFormatted: String? = null,
-    val sourceLabel: String = "TGJU (tgju.org/coin)"
+    val sourceLabel: String = "TGJU (tgju.org/coin)",
+    val sourceTimestampMs: Long = 0L,
+    val sourceTehranDay: String = ""
 )
 
 data class MarketRatesState(

@@ -5,17 +5,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -65,6 +66,7 @@ fun AnnualCalendarScreen(
     viewModel: ExpenseViewModel,
     onAddExpenseInMonth: (monthIndex: Int) -> Unit,
     onEditExpense: (ExpenseEntity) -> Unit,
+    topHeader: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedMonthIndex by remember { mutableStateOf<Int?>(null) }
@@ -89,9 +91,12 @@ fun AnnualCalendarScreen(
         Column(
             modifier = modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(vertical = 4.dp)
                 .testTag("annual_calendar_screen")
         ) {
+            topHeader?.invoke()
+
             // Year Navigation Header
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -301,30 +306,43 @@ fun AnnualCalendarScreen(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // 12 Persian Months Grid - 3 columns x 4 rows fits completely on screen
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            // 12 Persian Months Grid (3 columns x 4 rows) inside the unified full-page scroll
+            Column(
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                items(monthSummaries) { monthSummary ->
-                    val isCurrent = monthSummary.monthIndex == currentMonth && currentYear == clockState.shamsiDate.year
-                    val progress = (monthSummary.totalExpense.toFloat() / highestMonthExpense.toFloat()).coerceIn(0f, 1f)
+                monthSummaries.chunked(3).forEach { rowMonths ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        rowMonths.forEach { monthSummary ->
+                            val isCurrent = monthSummary.monthIndex == currentMonth && currentYear == clockState.shamsiDate.year
+                            val progress = (monthSummary.totalExpense.toFloat() / highestMonthExpense.toFloat()).coerceIn(0f, 1f)
 
-                    CompactMonthCard(
-                        summary = monthSummary,
-                        isCurrent = isCurrent,
-                        relativeProgress = progress,
-                        onClick = {
-                            viewModel.setSelectedMonth(monthSummary.monthIndex)
-                            selectedMonthIndex = monthSummary.monthIndex
+                            CompactMonthCard(
+                                summary = monthSummary,
+                                isCurrent = isCurrent,
+                                relativeProgress = progress,
+                                onClick = {
+                                    viewModel.setSelectedMonth(monthSummary.monthIndex)
+                                    selectedMonthIndex = monthSummary.monthIndex
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            )
                         }
-                    )
+                        repeat(3 - rowMonths.size) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
                 }
             }
+
+            Spacer(modifier = Modifier.height(84.dp))
         }
     }
 }
@@ -334,10 +352,11 @@ fun CompactMonthCard(
     summary: MonthSummary,
     isCurrent: Boolean,
     relativeProgress: Float,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(13.dp))
             .clickable { onClick() }

@@ -22,11 +22,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.AutoAwesomeMosaic
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Grid4x4
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.SportsEsports
@@ -69,6 +73,8 @@ import com.example.data.model.EntertainmentDownloadState
 import com.example.data.model.EntertainmentGameType
 import com.example.data.model.EntertainmentPackMetaEntity
 import com.example.data.model.EntertainmentPuzzleEntity
+import com.example.ui.components.EntertainmentGuideDialog
+import com.example.ui.components.InlineGameQuickGuideCard
 import com.example.ui.theme.OutfitFontFamily
 import com.example.ui.theme.appSecondaryTextColor
 import com.example.ui.theme.appTextColor
@@ -89,6 +95,20 @@ fun EntertainmentScreen(
     var selectedGameKey by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedDifficultyKey by rememberSaveable { mutableStateOf(EntertainmentDifficulty.BEGINNER.key) }
     var activePuzzleId by rememberSaveable { mutableStateOf<String?>(null) }
+    var isGuideDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var guideTargetGameKey by rememberSaveable { mutableStateOf<String?>(null) }
+
+    fun openGuide(gameType: EntertainmentGameType? = null) {
+        guideTargetGameKey = gameType?.key
+        isGuideDialogOpen = true
+    }
+
+    if (isGuideDialogOpen) {
+        EntertainmentGuideDialog(
+            initialGame = guideTargetGameKey?.let { EntertainmentGameType.fromKey(it) },
+            onDismiss = { isGuideDialogOpen = false }
+        )
+    }
 
     // Ensure full offline Room database is ready on first open
     LaunchedEffect(Unit) {
@@ -118,15 +138,17 @@ fun EntertainmentScreen(
         val nextPuzzle = if (currentIdx in 0 until sameBucket.lastIndex) sameBucket[currentIdx + 1] else null
 
         val openNext: (() -> Unit)? = nextPuzzle?.let { next -> { activePuzzleId = next.id } }
+        val activeGameType = EntertainmentGameType.fromKey(activePuzzle.gameType)
 
-        when (EntertainmentGameType.fromKey(activePuzzle.gameType)) {
+        when (activeGameType) {
             EntertainmentGameType.CROSSWORD -> {
                 CrosswordGameScreen(
                     puzzleEntity = activePuzzle,
                     onBack = { activePuzzleId = null },
                     onSaveProgress = { json, mistakes -> viewModel.saveEntertainmentProgress(activePuzzle.id, json, mistakes) },
                     onMarkCompleted = { json, secs, mistakes -> viewModel.markEntertainmentCompleted(activePuzzle.id, json, secs, mistakes) },
-                    onNextLevel = openNext
+                    onNextLevel = openNext,
+                    onShowGuide = { openGuide(EntertainmentGameType.CROSSWORD) }
                 )
             }
             EntertainmentGameType.SUDOKU -> {
@@ -135,7 +157,8 @@ fun EntertainmentScreen(
                     onBack = { activePuzzleId = null },
                     onSaveProgress = { json, mistakes -> viewModel.saveEntertainmentProgress(activePuzzle.id, json, mistakes) },
                     onMarkCompleted = { json, secs, mistakes -> viewModel.markEntertainmentCompleted(activePuzzle.id, json, secs, mistakes) },
-                    onNextLevel = openNext
+                    onNextLevel = openNext,
+                    onShowGuide = { openGuide(EntertainmentGameType.SUDOKU) }
                 )
             }
             EntertainmentGameType.TRIVIA -> {
@@ -144,7 +167,28 @@ fun EntertainmentScreen(
                     onBack = { activePuzzleId = null },
                     onSaveProgress = { json, mistakes -> viewModel.saveEntertainmentProgress(activePuzzle.id, json, mistakes) },
                     onMarkCompleted = { json, secs, mistakes -> viewModel.markEntertainmentCompleted(activePuzzle.id, json, secs, mistakes) },
-                    onNextLevel = openNext
+                    onNextLevel = openNext,
+                    onShowGuide = { openGuide(EntertainmentGameType.TRIVIA) }
+                )
+            }
+            EntertainmentGameType.CODEBREAKER -> {
+                CodebreakerGameScreen(
+                    puzzleEntity = activePuzzle,
+                    onBack = { activePuzzleId = null },
+                    onSaveProgress = { json, mistakes -> viewModel.saveEntertainmentProgress(activePuzzle.id, json, mistakes) },
+                    onMarkCompleted = { json, secs, mistakes -> viewModel.markEntertainmentCompleted(activePuzzle.id, json, secs, mistakes) },
+                    onNextLevel = openNext,
+                    onShowGuide = { openGuide(EntertainmentGameType.CODEBREAKER) }
+                )
+            }
+            EntertainmentGameType.NONOGRAM -> {
+                NonogramGameScreen(
+                    puzzleEntity = activePuzzle,
+                    onBack = { activePuzzleId = null },
+                    onSaveProgress = { json, mistakes -> viewModel.saveEntertainmentProgress(activePuzzle.id, json, mistakes) },
+                    onMarkCompleted = { json, secs, mistakes -> viewModel.markEntertainmentCompleted(activePuzzle.id, json, secs, mistakes) },
+                    onNextLevel = openNext,
+                    onShowGuide = { openGuide(EntertainmentGameType.NONOGRAM) }
                 )
             }
         }
@@ -163,6 +207,7 @@ fun EntertainmentScreen(
             allGamePuzzles = allPuzzles.filter { it.gameType == gameType.key },
             onSelectDifficulty = { selectedDifficultyKey = it.key },
             onSelectPuzzle = { activePuzzleId = it.id },
+            onShowGuide = { openGuide(gameType) },
             onBack = { selectedGameKey = null }
         )
         return
@@ -190,7 +235,8 @@ fun EntertainmentScreen(
                 solvedPuzzles = solvedCount,
                 packMeta = packMeta,
                 downloadState = downloadState,
-                onDownloadFullDatabase = { viewModel.downloadFullEntertainmentDatabase() }
+                onDownloadFullDatabase = { viewModel.downloadFullEntertainmentDatabase() },
+                onOpenGuide = { openGuide(null) }
             )
         }
 
@@ -205,8 +251,20 @@ fun EntertainmentScreen(
             )
         }
 
-        // 3 Game Cards (Crossword 15x15, Sudoku, Trivia — Persian Wordle removed)
+        // 5 Adult Brain Game Cards (Crossword 15x15, Sudoku, Trivia, Codebreaker, Nonogram)
         val gameStyles = listOf(
+            GameCardStyle(
+                type = EntertainmentGameType.CODEBREAKER,
+                icon = Icons.Default.LockOpen,
+                gradient = listOf(Color(0xFFBE123C), Color(0xFF7C3AED)),
+                badgeText = "جدید • استنتاج و رمزگشایی"
+            ),
+            GameCardStyle(
+                type = EntertainmentGameType.NONOGRAM,
+                icon = Icons.Default.AutoAwesomeMosaic,
+                gradient = listOf(Color(0xFFD97706), Color(0xFFEA580C)),
+                badgeText = "جدید • منطق تصویری"
+            ),
             GameCardStyle(
                 type = EntertainmentGameType.CROSSWORD,
                 icon = Icons.Default.GridOn,
@@ -235,6 +293,7 @@ fun EntertainmentScreen(
                     style = style,
                     totalStages = gamePuzzles.size,
                     solvedStages = gameSolved,
+                    onShowGuide = { openGuide(style.type) },
                     onClick = {
                         selectedDifficultyKey = EntertainmentDifficulty.BEGINNER.key
                         selectedGameKey = style.type.key
@@ -260,7 +319,8 @@ private fun OfflineDatabaseHeaderCard(
     solvedPuzzles: Int,
     packMeta: EntertainmentPackMetaEntity?,
     downloadState: EntertainmentDownloadState,
-    onDownloadFullDatabase: () -> Unit
+    onDownloadFullDatabase: () -> Unit,
+    onOpenGuide: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -435,9 +495,46 @@ private fun OfflineDatabaseHeaderCard(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = enDigits("بروزرسانی دیتابیس آفلاین (360 مرحله)"),
+                        text = enDigits("بروزرسانی دیتابیس آفلاین (600 مرحله)"),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            // Simple Step-by-Step Guide Trigger right inside the Entertainment header
+            Surface(
+                shape = RoundedCornerShape(13.dp),
+                color = Color.White.copy(alpha = 0.14f),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .clickable(onClick = onOpenGuide)
+                    .testTag("entertainment_open_guide_button")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                        contentDescription = null,
+                        tint = Color(0xFFFDE047),
+                        modifier = Modifier.size(19.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "راهنمای ساده و گام‌به‌گام همه بازی‌ها",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -452,6 +549,7 @@ private fun EntertainmentGameCard(
     style: GameCardStyle,
     totalStages: Int,
     solvedStages: Int,
+    onShowGuide: () -> Unit,
     onClick: () -> Unit
 ) {
     val progress = if (totalStages > 0) solvedStages.toFloat() / totalStages else 0f
@@ -555,16 +653,34 @@ private fun EntertainmentGameCard(
                 }
             }
 
-            Surface(
-                shape = CircleShape,
-                color = style.gradient.first(),
-                modifier = Modifier.size(36.dp)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Box(contentAlignment = Alignment.Center) {
+                Surface(
+                    shape = CircleShape,
+                    color = style.gradient.first(),
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "شروع بازی",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = onShowGuide,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("entertainment_card_guide_${style.type.key.lowercase()}")
+                ) {
                     Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "شروع بازی",
-                        tint = Color.White,
+                        imageVector = Icons.AutoMirrored.Filled.HelpOutline,
+                        contentDescription = "راهنمای ${style.type.titleFa}",
+                        tint = style.gradient.first(),
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -580,6 +696,7 @@ private fun GameLevelSelectorScreen(
     allGamePuzzles: List<EntertainmentPuzzleEntity>,
     onSelectDifficulty: (EntertainmentDifficulty) -> Unit,
     onSelectPuzzle: (EntertainmentPuzzleEntity) -> Unit,
+    onShowGuide: () -> Unit,
     onBack: () -> Unit
 ) {
     val levelList = remember(allGamePuzzles, selectedDifficulty) {
@@ -648,6 +765,18 @@ private fun GameLevelSelectorScreen(
                         color = appSecondaryTextColor(MaterialTheme.colorScheme.onSurfaceVariant),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
+                    )
+                }
+                IconButton(
+                    onClick = onShowGuide,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("level_selector_guide_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.HelpOutline,
+                        contentDescription = "راهنمای گام‌به‌گام ${gameType.titleFa}",
+                        tint = diffColor
                     )
                 }
             }
@@ -846,6 +975,14 @@ private fun GameLevelSelectorScreen(
                     }
                 }
             }
+        }
+
+        // Inline collapsible plain-Persian step-by-step quick guide for this specific game
+        item {
+            InlineGameQuickGuideCard(
+                gameType = gameType,
+                accentColor = diffColor
+            )
         }
 
         item { Spacer(modifier = Modifier.height(24.dp)) }

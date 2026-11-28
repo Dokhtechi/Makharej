@@ -1,8 +1,11 @@
 package com.example.ui.components
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -15,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,6 +29,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -40,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,6 +82,7 @@ fun PersianDailyCalendarCard(
     clockState: LiveClockState,
     modifier: Modifier = Modifier
 ) {
+    var isMonthlyCalendarExpanded by rememberSaveable { mutableStateOf(false) }
     var monthOffset by remember { mutableIntStateOf(0) }
     var selectedCell by remember { mutableStateOf<CalendarDayCell?>(null) }
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -122,8 +130,8 @@ fun PersianDailyCalendarCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Brush.verticalGradient(cardShellGradient))
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Top Hero Section: Luminous Royal Indigo -> Sky Cyan Banner
             Box(
@@ -173,7 +181,7 @@ fun PersianDailyCalendarCard(
                             center = Offset(size.width * 0.92f, size.height * 0.85f)
                         )
                     }
-                    .padding(horizontal = 12.dp, vertical = 12.dp)
+                    .padding(horizontal = 11.dp, vertical = 9.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     // Hero Row: Golden Day Squircle + Weekday/Month + Live Clock Capsule
@@ -280,7 +288,7 @@ fun PersianDailyCalendarCard(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(7.dp))
 
                     // Jewel-toned Frosted Strip for Gregorian, Shamsi & Hijri Dates
                     Surface(
@@ -292,7 +300,7 @@ fun PersianDailyCalendarCard(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 9.dp, vertical = 8.dp)
+                                .padding(horizontal = 9.dp, vertical = 6.dp)
                         ) {
                             // Row 2: 2026/11/15   15 نوامبر   1405/08/25
                             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
@@ -347,9 +355,9 @@ fun PersianDailyCalendarCard(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
                             HorizontalDivider(color = Color.White.copy(alpha = 0.18f))
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
 
                             // Row 3: Hijri date in the exact same clean layout
                             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
@@ -410,7 +418,7 @@ fun PersianDailyCalendarCard(
                 }
             }
 
-            // Monthly Calendar Section: Clean Bright Canvas with Vibrant Jewel Tiles
+            // Collapsible Monthly 30-Day Calendar Drawer (collapsed by default)
             val calendarOnSurface = if (isDark) Color.White else Color.Black
 
             Column(
@@ -419,141 +427,200 @@ fun PersianDailyCalendarCard(
                     .padding(horizontal = 2.dp)
                     .testTag("monthly_calendar_container")
             ) {
-                // Calendar Header: Indigo Icon + Month Title + Badesaba Pill + Circular Nav Buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                // Clickable Drawer Header Bar right under the colored date banner
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isDark) Color(0xFF1E293B) else Color(0xFFEEF2FF),
+                    border = BorderStroke(
+                        1.dp,
+                        if (isMonthlyCalendarExpanded) {
+                            Color(0xFF6366F1)
+                        } else if (isDark) {
+                            Color(0xFF334155)
+                        } else {
+                            Color(0xFFC7D2FE)
+                        }
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { isMonthlyCalendarExpanded = !isMonthlyCalendarExpanded }
+                        .testTag("toggle_monthly_calendar_button")
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isDark) Color(0xFF312E81) else Color(0xFFEEF2FF),
-                            border = BorderStroke(1.dp, if (isDark) Color(0xFF6366F1) else Color(0xFFC7D2FE)),
-                            modifier = Modifier.size(32.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.CalendarMonth,
-                                    contentDescription = null,
-                                    tint = if (isDark) Color(0xFFA5B4FC) else Color(0xFF4F46E5),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "تقویم ${calendarData.monthName} ${PersianDateHelper.toPersianDigits(calendarData.shamsiYear)}",
-                            style = TextStyle(
-                                fontFamily = LalezarFontFamily,
-                                fontSize = 16.5.sp,
-                                color = calendarOnSurface,
-                                platformStyle = PlatformTextStyle(includeFontPadding = false)
-                            ),
-                            softWrap = true
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isDark) Color(0xFF064E3B) else Color(0xFFECFDF5),
-                            border = BorderStroke(0.9.dp, Color(0xFF34D399))
-                        ) {
-                            Text(
-                                text = "باد صبا",
-                                fontFamily = VazirmatnFontFamily,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isDark) Color(0xFFA7F3D0) else Color(0xFF047857),
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (monthOffset != 0) {
                             Surface(
                                 shape = RoundedCornerShape(9.dp),
-                                color = Color(0xFF4F46E5),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(9.dp))
-                                    .clickable {
-                                        monthOffset = 0
-                                        selectedCell = null
-                                    }
-                                    .testTag("calendar_reset_today_button")
+                                color = if (isDark) Color(0xFF312E81) else Color.White,
+                                border = BorderStroke(1.dp, if (isDark) Color(0xFF6366F1) else Color(0xFFC7D2FE)),
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.CalendarMonth,
+                                        contentDescription = null,
+                                        tint = if (isDark) Color(0xFFA5B4FC) else Color(0xFF4F46E5),
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "تقویم ماهانه",
+                                style = TextStyle(
+                                    fontFamily = LalezarFontFamily,
+                                    fontSize = 15.5.sp,
+                                    color = calendarOnSurface,
+                                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                ),
+                                softWrap = true
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isMonthlyCalendarExpanded) Color(0xFF4F46E5) else Color(0xFF4F46E5).copy(alpha = 0.14f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
                                 Text(
-                                    text = "امروز",
+                                    text = if (isMonthlyCalendarExpanded) "بستن" else "باز کردن",
                                     fontFamily = VazirmatnFontFamily,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (isMonthlyCalendarExpanded) Color.White else if (isDark) Color(0xFFC7D2FE) else Color(0xFF4338CA),
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
-                            }
-                            Spacer(modifier = Modifier.width(2.dp))
-                        }
-
-                        IconButton(
-                            onClick = {
-                                monthOffset -= 1
-                                selectedCell = null
-                            },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .testTag("calendar_prev_month_button")
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = if (isDark) Color(0xFF312E81) else Color(0xFFEEF2FF),
-                                border = BorderStroke(0.8.dp, if (isDark) Color(0xFF6366F1) else Color(0xFFC7D2FE)),
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                                        contentDescription = "ماه قبل",
-                                        tint = if (isDark) Color(0xFFC7D2FE) else Color(0xFF4338CA),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        IconButton(
-                            onClick = {
-                                monthOffset += 1
-                                selectedCell = null
-                            },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .testTag("calendar_next_month_button")
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = if (isDark) Color(0xFF312E81) else Color(0xFFEEF2FF),
-                                border = BorderStroke(0.8.dp, if (isDark) Color(0xFF6366F1) else Color(0xFFC7D2FE)),
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                        contentDescription = "ماه بعد",
-                                        tint = if (isDark) Color(0xFFC7D2FE) else Color(0xFF4338CA),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
+                                Icon(
+                                    imageVector = if (isMonthlyCalendarExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = if (isMonthlyCalendarExpanded) "بستن تقویم ماهانه" else "باز کردن تقویم ماهانه",
+                                    tint = if (isMonthlyCalendarExpanded) Color.White else if (isDark) Color(0xFFC7D2FE) else Color(0xFF4338CA),
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                AnimatedVisibility(
+                    visible = isMonthlyCalendarExpanded,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .testTag("monthly_calendar_drawer_body")
+                    ) {
+                        // Month Navigation Row (امروز + ماه قبل / ماه بعد)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "جابه‌جایی بین ماه‌ها",
+                                fontFamily = VazirmatnFontFamily,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
+                            )
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (monthOffset != 0) {
+                                    Surface(
+                                        shape = RoundedCornerShape(9.dp),
+                                        color = Color(0xFF4F46E5),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(9.dp))
+                                            .clickable {
+                                                monthOffset = 0
+                                                selectedCell = null
+                                            }
+                                            .testTag("calendar_reset_today_button")
+                                    ) {
+                                        Text(
+                                            text = "امروز",
+                                            fontFamily = VazirmatnFontFamily,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        monthOffset -= 1
+                                        selectedCell = null
+                                    },
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("calendar_prev_month_button")
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = if (isDark) Color(0xFF312E81) else Color(0xFFEEF2FF),
+                                        border = BorderStroke(0.8.dp, if (isDark) Color(0xFF6366F1) else Color(0xFFC7D2FE)),
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                                contentDescription = "ماه قبل",
+                                                tint = if (isDark) Color(0xFFC7D2FE) else Color(0xFF4338CA),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        monthOffset += 1
+                                        selectedCell = null
+                                    },
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("calendar_next_month_button")
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = if (isDark) Color(0xFF312E81) else Color(0xFFEEF2FF),
+                                        border = BorderStroke(0.8.dp, if (isDark) Color(0xFF6366F1) else Color(0xFFC7D2FE)),
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                                contentDescription = "ماه بعد",
+                                                tint = if (isDark) Color(0xFFC7D2FE) else Color(0xFF4338CA),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
 
                 // Weekday Header Strip (شنبه .. جمعه)
                 val weekHeaders = listOf("ش", "ی", "د", "س", "چ", "پ", "ج")
@@ -820,6 +887,8 @@ fun PersianDailyCalendarCard(
                         color = if (isDark) Color(0xFFE2E8F0) else Color(0xFF1E293B),
                         modifier = Modifier.testTag("official_holidays_reasons_section")
                     )
+                }
+                    }
                 }
             }
         }
